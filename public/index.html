@@ -124,10 +124,21 @@ function downloadICS(content,filename){const a=document.createElement("a");a.hre
 // ── EMAIL ─────────────────────────────────────────────────────────
 async function sendMissionEmail(mission,users,type="created"){
   const assignee=getUser(users,mission.assignedTo),creator=getUser(users,mission.createdBy);
-  const subjects={created:`🔧 Nouvelle intervention : ${mission.title}`,validated:`✅ Intervention validée : ${mission.title}`};
-  const messages={created:`Une nouvelle intervention vous a été assignée.`,validated:`Votre intervention a été validée et vous est assignée.`};
+  const subjects={
+    created:`🔧 Nouvelle intervention : ${mission.title}`,
+    validated:`✅ Intervention validée : ${mission.title}`,
+    pending:`⏳ À valider : ${mission.title}`,
+  };
+  const messages={
+    created:`Une nouvelle intervention vous a été assignée.`,
+    validated:`Votre intervention a été validée et vous est assignée.`,
+    pending:`${creator.name} a soumis une intervention en attente de votre validation.`,
+  };
   const dateStr=mission.dateEnd&&mission.dateEnd!==mission.date?`Du ${fmtShort(mission.date)} au ${fmtShort(mission.dateEnd)}`:fmtShort(mission.date);
-  const recipients=users.filter(u=>u.email&&u.email.includes("@"));
+  // "pending" → admins uniquement | autres → tous ceux avec email
+  const recipients=type==="pending"
+    ? users.filter(u=>u.email&&u.email.includes("@")&&(u.role==="admin"||u.adminAccess))
+    : users.filter(u=>u.email&&u.email.includes("@"));
   const params={subject:subjects[type]||subjects.created,message:messages[type]||messages.created,mission_title:mission.title,mission_date:dateStr,mission_location:mission.location||"Non précisé",mission_description:mission.description||"—",mission_priority:mission.priority==="urgent"?"⚡ URGENT":"Normal",assigned_to:assignee.name,created_by:creator.name,app_url:window.location.href};
   // Envoie via Netlify Function (pas de CORS)
   await Promise.all(recipients.map(u=>
@@ -791,7 +802,7 @@ function SettingsScreen({currentUser,users,onSave,onLogout,storage}){
                     </div>
                     {editPwd===u.id
                       ?<div className="flex gap-2"><input className={inp+" flex-1 !py-2"} value={newPwd} onChange={e=>setNP(e.target.value)} placeholder="Nouveau mot de passe" type="text"/><button onClick={()=>{if(!newPwd.trim())return;persist(list.map(x=>x.id===u.id?{...x,password:newPwd.trim()}:x));setEP(null);setNP("");}} className="bg-indigo-500 text-white rounded-xl px-3 text-xs font-bold">✓</button><button onClick={()=>{setEP(null);setNP("");}} className="border rounded-xl px-3 text-xs text-slate-500">✕</button></div>
-                      :<div className="flex items-center justify-between bg-slate-50 rounded-xl px-3 py-2"><span className="text-xs text-slate-500 font-mono">{u.password}</span><button onClick={()=>{setEP(u.id);setNP("");}} className="text-xs text-indigo-500 font-semibold">Modifier</button></div>
+                      :<div className="flex items-center justify-between bg-slate-50 rounded-xl px-3 py-2"><span className="text-xs text-slate-400 font-mono tracking-widest">{"•".repeat(Math.min(u.password?.length||8,12))}</span><button onClick={()=>{setEP(u.id);setNP("");}} className="text-xs text-indigo-500 font-semibold">Modifier</button></div>
                     }
                   </div>
                 </div>
@@ -1109,7 +1120,13 @@ function App(){
   }
   async function addMission(m){
     const ns={...storage,[m.date]:[...(storage[m.date]||[]),m]};await persistCurrent(ns);
-    if(isApproved(m)){const fu=await st.get(SK_USERS)||users;sendMissionEmail(m,fu,"created").catch(()=>{});}
+    const fu=await st.get(SK_USERS)||users;
+    if(m.approved===false){
+      // Mikhael vient de soumettre — notifier Laetitia
+      sendMissionEmail(m,fu,"pending").catch(()=>{});
+    } else if(isApproved(m)){
+      sendMissionEmail(m,fu,"created").catch(()=>{});
+    }
   }
   async function deleteMission(m){
     const prev=shiftMonth(cal.y,cal.m,-1),prevStr=`${prev.y}-${padM(prev.m)}`,ns={...storage};
