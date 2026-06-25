@@ -137,7 +137,7 @@ async function sendMissionEmail(mission,users,type="created"){
   const dateStr=mission.dateEnd&&mission.dateEnd!==mission.date?`Du ${fmtShort(mission.date)} au ${fmtShort(mission.dateEnd)}`:fmtShort(mission.date);
   // "pending" → admins uniquement | autres → tous ceux avec email
   const recipients=type==="pending"
-    ? users.filter(u=>u.email&&u.email.includes("@")&&(u.role==="admin"||u.adminAccess))
+    ? users.filter(u=>u.email&&u.email.includes("@")&&u.role==="admin")
     : users.filter(u=>u.email&&u.email.includes("@"));
   const params={subject:subjects[type]||subjects.created,message:messages[type]||messages.created,mission_title:mission.title,mission_date:dateStr,mission_location:mission.location||"Non précisé",mission_description:mission.description||"—",mission_priority:mission.priority==="urgent"?"⚡ URGENT":"Normal",assigned_to:assignee.name,created_by:creator.name,app_url:window.location.href};
   // Envoie via Netlify Function (pas de CORS)
