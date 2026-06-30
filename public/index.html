@@ -907,7 +907,7 @@ function MissionFormModal({mission,date,users,currentUser,onSave,onClose}){
     const location=locType==="CUSTOM"?locCustom.trim():locType;
     if(!title){setErr("Le titre est obligatoire.");return;}
     const duration=(parseInt(dH)||0)*60+(parseInt(dM)||0),end=dateEnd>=dateStart?dateEnd:dateStart;
-    let approved;if(editing)approved=mission.approved;else if(currentUser.role==="admin"||currentUser.adminAccess)approved=undefined;else approved=false;
+    let approved;if(editing)approved=mission.approved;else if(currentUser.role==="admin")approved=undefined;else approved=false;
     onSave({id:mission?.id||uid(),date:dateStart,dateEnd:end!==dateStart?end:undefined,title,location,description:desc.trim(),assignedTo:assigned,status,priority,duration,approved,createdBy:mission?.createdBy||currentUser.id,createdAt:mission?.createdAt||new Date().toISOString(),photos:formPhotos,comments:mission?.comments||[]});
   }
   const inp="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white";
