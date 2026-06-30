@@ -553,7 +553,7 @@ function BoardScreen({storage,users,currentUser,onMissionClick,onNewMission,onSt
         <div className="flex gap-3 p-4" style={{minWidth:`${cols.length*272}px`,height:"100%"}}>
           {cols.map(status=>{
             const s=STATUS_CSS[status]||STATUS_CSS.todo;
-            const items=filtered.filter(m=>m.status===status).sort((a,b)=>b.date.localeCompare(a.date));
+            const items=filtered.filter(m=>m.status===status).sort((a,b)=>a.date.localeCompare(b.date));
             const isOver=dragOver===status;
             const canDrop=dragging&&dragging.status!==status;
             return(
