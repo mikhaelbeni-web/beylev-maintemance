@@ -9,14 +9,12 @@
   <title>Beylev Maintenance</title>
   <link rel="manifest" href="manifest.json"/>
   <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
   <style>
     *{-webkit-font-smoothing:antialiased;box-sizing:border-box}
     body{margin:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#1e293b}
     .hide-scroll::-webkit-scrollbar{display:none}
     .hide-scroll{-ms-overflow-style:none;scrollbar-width:none}
     @keyframes fadeIn{from{opacity:0}to{opacity:1}}
-    .slide-up{transform:translateY(0)}
     .fade-in{animation:fadeIn 0.2s ease}
   </style>
 </head>
@@ -31,15 +29,12 @@
 
 <script>
   const FIREBASE_CONFIG={apiKey:"AIzaSyB7i6PnqFAdBuGuFM84BKGYWwRT0P8GClc",authDomain:"planning-maintenance-9a3c4.firebaseapp.com",projectId:"planning-maintenance-9a3c4",storageBucket:"planning-maintenance-9a3c4.firebasestorage.app",messagingSenderId:"543454250227",appId:"1:543454250227:web:b0f7f3cadda8e70a2da386"};
-  const EMAILJS_CONFIG={publicKey:"85sm4uPYIdNapR7Mn",serviceId:"service_f8wposw",templateId:"template_8h5t57i"};
   window.__CONFIGURED=true;
-  window.__EMAIL_READY=true;
-  try{firebase.initializeApp(FIREBASE_CONFIG);window.__db=firebase.firestore();emailjs.init({publicKey:EMAILJS_CONFIG.publicKey});}catch(e){window.__CONFIGURED=false;console.error(e);}
-  window.__EMAILJS_CONFIG=EMAILJS_CONFIG;
+  try{firebase.initializeApp(FIREBASE_CONFIG);window.__db=firebase.firestore();}catch(e){window.__CONFIGURED=false;console.error(e);}
 </script>
 
 <script type="text/babel">
-const {useState,useEffect,useRef,useCallback}=React;
+const {useState,useEffect,useRef}=React;
 
 // ── CONSTANTS ────────────────────────────────────────────────────
 const SK_USERS="lv_users_v1";
@@ -49,16 +44,22 @@ const DEFAULT_USERS=[
   {id:"u2",username:"mikhael",password:"Levloft2024!",name:"Mikhael",role:"manager",initials:"MK",email:"",adminAccess:true},
   {id:"u3",username:"tech",password:"Tech2024!",name:"Technicien",role:"tech",initials:"TC",email:""},
 ];
-const TASK_TYPES=["Plomberie — fuite / dégât des eaux","Plomberie — débouchage","Électricité — panne / disjoncteur","Électricité — installation / remplacement","Serrurerie — remplacement serrure","Serrurerie — clé perdue / accès bloqué","Peinture — retouche","Peinture — réfection complète","Ménage — nettoyage complet","Ménage — état des lieux entrée","Ménage — état des lieux sortie","Chauffage — vérification chaudière","Chauffage — radiateur défectueux","Climatisation — entretien / filtre","Équipement — remplacement / livraison","Vitrerie — remplacement vitre","Nuisibles — désinfection / traitement","Transfert marchandise","Déménagement","Livraison marchandise","Inspection générale","Réparation générale","Travaux — devis / prises de mesures","CUSTOM"];
-const BUILDINGS_LIST=["32 rue Saint-Marc 75002 Paris","93 rue du Commerce 75015 Paris","81 rue de Sevres 75006 Paris","55 rue Saint Antoine 75004 Paris","4 rue Bayard 75008 Paris","104 boulevard Auguste Blanqui 75013 Paris","19 rue Brezin 75014 Paris","50 rue de Buzenval 75020 Paris","106 rue Saint-Charles 75015 Paris","22 rue Duban 75016 Paris","14 rue Mouffetard 75005 Paris","217 avenue de Versailles 75016 Paris","32 rue Frederick Lemaitre 75020 Paris","38 rue Lantiez 75017 Paris","RLB Hotel Belleville","116-118 rue de Belleville 75020 Paris","109 rue du Temple 75003 Paris","CC Ozoir","CUSTOM"];
+const TASK_TYPES=["Plomberie — fuite / degat des eaux","Plomberie — debouchage","Electricite — panne / disjoncteur","Electricite — installation / remplacement","Serrurerie — remplacement serrure","Serrurerie — cle perdue / acces bloque","Peinture — retouche","Peinture — refection complete","Menage — nettoyage complet","Menage — etat des lieux entree","Menage — etat des lieux sortie","Chauffage — verification chaudiere","Chauffage — radiateur defectueux","Climatisation — entretien / filtre","Equipement — remplacement / livraison","Vitrerie — remplacement vitre","Nuisibles — desinfection / traitement","Transfert marchandise","Demenagement","Livraison marchandise","Inspection generale","Reparation generale","Travaux — devis / prises de mesures","CUSTOM"];
+const BUILDINGS_LIST=["55 rue Saint Antoine 75004 Paris","4 rue Bayard 75008 Paris","104 boulevard Auguste Blanqui 75013 Paris","19 rue Brezin 75014 Paris","50 rue de Buzenval 75020 Paris","106 rue Saint-Charles 75015 Paris","171 avenue Jean Baptiste Clement 92140 Clamart","24 rue Saint Gilles 75003 Paris","32 rue Picot 75116 Paris","14 rue des Vertus 75003 Paris","305 cours Emile Zola 69100 Villeurbanne","67-69 rue de Douai 75009 Paris","53 rue de la Harpe 75005 Paris","81 rue de Sevres 75006 Paris","29 rue Belgrand 75020 Paris","250 boulevard Jean Jaures 92100 Boulogne-Billancourt","16 bis rue Pierre Fontaine 75009 Paris","15 rue du Grenier Saint Lazare 75003 Paris","Chemin de l Epinay 14800 Touques","130 boulevard Massena 75013 Paris","1-5 rue du Marechal Leclerc 94410 Saint-Maurice","112-114 rue Oberkampf 75011 Paris","138 rue du Faubourg Poissonniere 75010 Paris","24 rue Saint Martin 75004 Paris","22 rue Duban 75016 Paris","46 bis rue Saint Didier 75016 Paris","83 avenue du Roule 92200 Neuilly-sur-Seine","1-3 rue d Assas 75006 Paris","14 rue Mouffetard 75005 Paris","217 avenue de Versailles 75016 Paris","32 rue Frederick Lemaitre 75020 Paris","38 rue Lantiez 75017 Paris","32 rue Saint-Marc 75002 Paris","93 rue du Commerce 75015 Paris","RLB Hotel Belleville","116-118 rue de Belleville 75020 Paris","109 rue du Temple 75003 Paris","CC Ozoir","CUSTOM"];
 const STATUS={
-  todo:{label:"À faire",bg:"bg-blue-50",text:"text-blue-600",border:"border-blue-200",dot:"bg-blue-400",col:"bg-blue-500"},
-  inprogress:{label:"En cours",bg:"bg-violet-50",text:"text-violet-600",border:"border-violet-200",dot:"bg-violet-500",col:"bg-violet-500"},
-  done:{label:"Terminé",bg:"bg-emerald-50",text:"text-emerald-600",border:"border-emerald-200",dot:"bg-emerald-500",col:"bg-emerald-500"},
-  cancelled:{label:"Annulé",bg:"bg-slate-50",text:"text-slate-400",border:"border-slate-100",dot:"bg-slate-300",col:"bg-slate-400"},
+  todo:{label:"A faire",bg:"bg-blue-50",text:"text-blue-600",border:"border-blue-200",dot:"bg-blue-400"},
+  inprogress:{label:"En cours",bg:"bg-violet-50",text:"text-violet-600",border:"border-violet-200",dot:"bg-violet-500"},
+  done:{label:"Termine",bg:"bg-emerald-50",text:"text-emerald-600",border:"border-emerald-200",dot:"bg-emerald-500"},
+  cancelled:{label:"Annule",bg:"bg-slate-50",text:"text-slate-400",border:"border-slate-100",dot:"bg-slate-300"},
 };
-const MONTHS_FR=["Janvier","Février","Mars","Avril","Mai","Juin","Juillet","Août","Septembre","Octobre","Novembre","Décembre"];
-const MONTHS_SHORT=["Jan","Fév","Mar","Avr","Mai","Jun","Jul","Aoû","Sep","Oct","Nov","Déc"];
+const STATUS_CSS={
+  todo:{bg:"#eff6ff",text:"#2563eb",dot:"#3b82f6",label:"A faire"},
+  inprogress:{bg:"#f5f3ff",text:"#7c3aed",dot:"#8b5cf6",label:"En cours"},
+  done:{bg:"#f0fdf4",text:"#16a34a",dot:"#22c55e",label:"Termine"},
+  cancelled:{bg:"#f8fafc",text:"#94a3b8",dot:"#cbd5e1",label:"Annule"},
+};
+const MONTHS_FR=["Janvier","Fevrier","Mars","Avril","Mai","Juin","Juillet","Aout","Septembre","Octobre","Novembre","Decembre"];
+const MONTHS_SHORT=["Jan","Fev","Mar","Avr","Mai","Jun","Jul","Aou","Sep","Oct","Nov","Dec"];
 const DAYS_FR=["L","M","M","J","V","S","D"];
 
 // ── STORAGE ──────────────────────────────────────────────────────
@@ -114,40 +115,44 @@ function buildICS(missions,users){
   const lines=["BEGIN:VCALENDAR","VERSION:2.0","PRODID:-//Beylev//FR","CALSCALE:GREGORIAN","METHOD:PUBLISH","X-WR-CALNAME:Maintenance Beylev"];
   missions.forEach(m=>{
     const a=getUser(users,m.assignedTo);
-    lines.push("BEGIN:VEVENT",`UID:${m.id}@beylev`,`DTSTAMP:${now}`,`DTSTART;VALUE=DATE:${d2ICS(m.date)}`,`DTEND;VALUE=DATE:${nextDay(m.dateEnd||m.date)}`,`SUMMARY:${escICS(m.title+(m.priority==="urgent"?" ⚡":"")+(m.location?" — "+m.location:""))}`,m.location?`LOCATION:${escICS(m.location)}`:"",`DESCRIPTION:${escICS([m.description,"Assigné: "+a.name].filter(Boolean).join(" | "))}`,`STATUS:${m.status==="done"?"COMPLETED":m.status==="cancelled"?"CANCELLED":"CONFIRMED"}`,  "END:VEVENT");
+    lines.push("BEGIN:VEVENT",`UID:${m.id}@beylev`,`DTSTAMP:${now}`,`DTSTART;VALUE=DATE:${d2ICS(m.date)}`,`DTEND;VALUE=DATE:${nextDay(m.dateEnd||m.date)}`,`SUMMARY:${escICS(m.title+(m.priority==="urgent"?" - URGENT":"")+(m.location?" - "+m.location:""))}`,m.location?`LOCATION:${escICS(m.location)}`:"",`DESCRIPTION:${escICS([m.description,"Assigne: "+a.name].filter(Boolean).join(" | "))}`,`STATUS:${m.status==="done"?"COMPLETED":m.status==="cancelled"?"CANCELLED":"CONFIRMED"}`,"END:VEVENT");
   });
   lines.push("END:VCALENDAR");
   return lines.filter(Boolean).join("\r\n");
 }
 function downloadICS(content,filename){const a=document.createElement("a");a.href="data:text/calendar;charset=utf-8,"+encodeURIComponent(content);a.download=filename;document.body.appendChild(a);a.click();document.body.removeChild(a);}
 
-// ── EMAIL ─────────────────────────────────────────────────────────
+// ── EMAIL (via Vercel API → Resend) ────────────────────────────────
+async function sendEmailRaw(p){
+  try{
+    await fetch("/api/send-email",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(p)});
+  }catch(e){console.warn("Email error:",e);}
+}
+
+// Notifie l'assigne quand une mission est creee ou validee
 async function sendMissionEmail(mission,users,type="created"){
   const assignee=getUser(users,mission.assignedTo),creator=getUser(users,mission.createdBy);
-  const subjects={
-    created:`🔧 Nouvelle intervention : ${mission.title}`,
-    validated:`✅ Intervention validée : ${mission.title}`,
-    pending:`⏳ À valider : ${mission.title}`,
-  };
-  const messages={
-    created:`Une nouvelle intervention vous a été assignée.`,
-    validated:`Votre intervention a été validée et vous est assignée.`,
-    pending:`${creator.name} a soumis une intervention en attente de votre validation.`,
-  };
+  const subjects={created:`Nouvelle intervention : ${mission.title}`,validated:`Intervention validee : ${mission.title}`};
+  const messages={created:`Une nouvelle intervention vous a ete assignee.`,validated:`Votre intervention a ete validee et vous est assignee.`};
   const dateStr=mission.dateEnd&&mission.dateEnd!==mission.date?`Du ${fmtShort(mission.date)} au ${fmtShort(mission.dateEnd)}`:fmtShort(mission.date);
-  // "pending" → admins uniquement | autres → tous ceux avec email
-  const recipients=type==="pending"
-    ? users.filter(u=>u.email&&u.email.includes("@")&&u.role==="admin")
-    : users.filter(u=>u.email&&u.email.includes("@"));
-  const params={subject:subjects[type]||subjects.created,message:messages[type]||messages.created,mission_title:mission.title,mission_date:dateStr,mission_location:mission.location||"Non précisé",mission_description:mission.description||"—",mission_priority:mission.priority==="urgent"?"⚡ URGENT":"Normal",assigned_to:assignee.name,created_by:creator.name,app_url:window.location.href};
-  // Envoie via Netlify Function (pas de CORS)
-  await Promise.all(recipients.map(u=>
-    fetch("/api/send-email",{
-      method:"POST",
-      headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({...params,to_email:u.email,to_name:u.name})
-    }).catch(e=>console.warn("Email:",e))
-  ));
+  const recipients=users.filter(u=>u.email&&u.email.includes("@")&&u.id===mission.assignedTo);
+  const params={subject:subjects[type]||subjects.created,message:messages[type]||messages.created,mission_title:mission.title,mission_date:dateStr,mission_location:mission.location||"Non precise",mission_description:mission.description||"—",mission_priority:mission.priority==="urgent"?"URGENT":"Normal",assigned_to:assignee.name,created_by:creator.name,app_url:window.location.href};
+  await Promise.all(recipients.map(u=>sendEmailRaw({...params,to_email:u.email,to_name:u.name})));
+}
+
+// Notifie les ADMINS qu'une mission attend leur validation (BUG FIX)
+async function sendValidationRequestEmail(mission,users){
+  const creator=getUser(users,mission.createdBy);
+  const dateStr=mission.dateEnd&&mission.dateEnd!==mission.date?`Du ${fmtShort(mission.date)} au ${fmtShort(mission.dateEnd)}`:fmtShort(mission.date);
+  const admins=users.filter(u=>(u.role==="admin"||u.adminAccess)&&u.email&&u.email.includes("@"));
+  const params={
+    subject:`A valider : ${mission.title}`,
+    message:`${creator.name} a soumis une nouvelle intervention qui attend votre validation.`,
+    mission_title:mission.title,mission_date:dateStr,mission_location:mission.location||"Non precise",
+    mission_description:mission.description||"—",mission_priority:mission.priority==="urgent"?"URGENT":"Normal",
+    assigned_to:getUser(users,mission.assignedTo).name,created_by:creator.name,app_url:window.location.href
+  };
+  await Promise.all(admins.map(u=>sendEmailRaw({...params,to_email:u.email,to_name:u.name})));
 }
 
 // ── DESIGN SYSTEM ─────────────────────────────────────────────────
@@ -162,29 +167,26 @@ function StatusBadge({status}){
   const s=STATUS[status]||STATUS.todo;
   return <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold ${s.bg} ${s.text}`}><span className={`w-1.5 h-1.5 rounded-full ${s.dot}`}/>{s.label}</span>;
 }
-
-function PriorityBadge(){return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-red-100 text-red-600">⚡ Urgent</span>;}
+function PriorityBadge(){return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-red-100 text-red-600">URGENT</span>;}
 
 function MissionCard({m,users,onClick,compact=false}){
   const assignee=getUser(users,m.assignedTo);
   const isPending=m.approved===false,isRejected=m.approved==="rejected";
-  const s=STATUS[m.status]||STATUS.todo;
   return(
     <button onClick={onClick} style={{color:"#1e293b"}} className={`w-full bg-white rounded-2xl text-left transition-all active:scale-[0.99] hover:shadow-md shadow-sm border border-slate-100 overflow-hidden ${m.priority==="urgent"&&!isPending?"border-l-4 border-l-red-400":isPending?"border-l-4 border-l-violet-400":""}`}>
       <div className="p-4">
         <div className="flex items-start gap-3">
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 mb-1 flex-wrap">
-              {isPending?<span className="text-xs font-bold text-violet-600 bg-violet-50 px-2 py-0.5 rounded-full">⏳ Validation</span>:isRejected?<span className="text-xs font-bold text-red-500 bg-red-50 px-2 py-0.5 rounded-full">✕ Refusé</span>:<StatusBadge status={m.status}/>}
+              {isPending?<span className="text-xs font-bold text-violet-600 bg-violet-50 px-2 py-0.5 rounded-full">En attente</span>:isRejected?<span className="text-xs font-bold text-red-500 bg-red-50 px-2 py-0.5 rounded-full">Refuse</span>:<StatusBadge status={m.status}/>}
               {m.priority==="urgent"&&!isPending&&<PriorityBadge/>}
             </div>
             <p className="font-semibold text-slate-800 text-base leading-snug">{m.title}</p>
-            {m.location&&<p className="text-xs text-slate-400 mt-0.5 truncate flex items-center gap-1"><span>📍</span>{m.location}</p>}
+            {m.location&&<p className="text-xs text-slate-400 mt-0.5 truncate">{m.location}</p>}
             {!compact&&m.description&&<p className="text-xs text-slate-500 mt-1 line-clamp-1">{m.description}</p>}
             <div className="flex items-center gap-3 mt-2">
-              <span className="text-xs text-slate-400">📅 {fmtMed(m.date)}{m.dateEnd&&m.dateEnd!==m.date?` → ${fmtMed(m.dateEnd)}`:""}</span>
-              {fmtDur(m.duration)&&<span className="text-xs text-slate-400">⏱ {fmtDur(m.duration)}</span>}
-              {(m.photos?.length||0)>0&&<span className="text-xs text-slate-400">📷 {m.photos.length}</span>}
+              <span className="text-xs text-slate-400">{fmtMed(m.date)}{m.dateEnd&&m.dateEnd!==m.date?` -> ${fmtMed(m.dateEnd)}`:""}</span>
+              {fmtDur(m.duration)&&<span className="text-xs text-slate-400">{fmtDur(m.duration)}</span>}
             </div>
           </div>
           <div className="shrink-0"><Avatar user={assignee} size="sm"/></div>
@@ -194,30 +196,15 @@ function MissionCard({m,users,onClick,compact=false}){
   );
 }
 
-// ── BOARD CARD (pure inline styles — no Tailwind needed) ────────────
-const STATUS_CSS={
-  todo:{bg:"#eff6ff",text:"#2563eb",dot:"#3b82f6",label:"À faire"},
-  inprogress:{bg:"#f5f3ff",text:"#7c3aed",dot:"#8b5cf6",label:"En cours"},
-  done:{bg:"#f0fdf4",text:"#16a34a",dot:"#22c55e",label:"Terminé"},
-  cancelled:{bg:"#f8fafc",text:"#94a3b8",dot:"#cbd5e1",label:"Annulé"},
-};
-
 function BoardCard({m,users,onClick}){
-  const assignee=getUser(users,m.assignedTo);
   const s=STATUS_CSS[m.status]||STATUS_CSS.todo;
   const isUrgent=m.priority==="urgent";
   return(
-    <button onClick={onClick} style={{
-      display:"block",width:"100%",background:"#ffffff",
-      border:`1px solid #e2e8f0`,borderRadius:16,padding:"12px 14px",
-      textAlign:"left",cursor:"pointer",color:"#1e293b",
-      boxShadow:"0 1px 3px rgba(0,0,0,0.08)",marginBottom:0,
-      borderLeft:isUrgent?"4px solid #ef4444":"1px solid #e2e8f0",
-    }}>
-      {isUrgent&&<span style={{fontSize:10,fontWeight:700,color:"#dc2626",background:"#fef2f2",padding:"1px 6px",borderRadius:10,display:"inline-block",marginBottom:6}}>⚡ URGENT</span>}
+    <button onClick={onClick} style={{display:"block",width:"100%",background:"#ffffff",border:"1px solid #e2e8f0",borderRadius:16,padding:"12px 14px",textAlign:"left",cursor:"pointer",color:"#1e293b",boxShadow:"0 1px 3px rgba(0,0,0,0.08)",borderLeft:isUrgent?"4px solid #ef4444":"1px solid #e2e8f0"}}>
+      {isUrgent&&<span style={{fontSize:10,fontWeight:700,color:"#dc2626",background:"#fef2f2",padding:"1px 6px",borderRadius:10,display:"inline-block",marginBottom:6}}>URGENT</span>}
       <div style={{fontWeight:600,fontSize:13,color:"#1e293b",lineHeight:1.4,marginBottom:4}}>{m.title}</div>
-      {m.location&&<div style={{fontSize:11,color:"#94a3b8",marginBottom:3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>📍 {m.location}</div>}
-      <div style={{fontSize:11,color:"#94a3b8",marginBottom:8}}>📅 {fmtMed(m.date)}</div>
+      {m.location&&<div style={{fontSize:11,color:"#94a3b8",marginBottom:3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{m.location}</div>}
+      <div style={{fontSize:11,color:"#94a3b8",marginBottom:8}}>{fmtMed(m.date)}</div>
       <div style={{display:"inline-flex",alignItems:"center",gap:5,padding:"3px 10px",borderRadius:20,background:s.bg,color:s.text,fontSize:11,fontWeight:600}}>
         <span style={{width:6,height:6,borderRadius:"50%",background:s.dot,display:"inline-block"}}/>
         {s.label}
@@ -229,40 +216,25 @@ function BoardCard({m,users,onClick}){
 // ── BOTTOM NAV ───────────────────────────────────────────────────
 function BottomNav({tab,setTab,pendingCount,canAdmin}){
   const tabs=[
-    {id:"home",icon:"🏠",label:"Accueil"},
-    {id:"calendar",icon:"📅",label:"Planning"},
-    {id:"board",icon:"📋",label:"Tableau"},
-    {id:"history",icon:"🔍",label:"Historique"},
-    {id:"settings",icon:canAdmin?"⚙️":"👤",label:canAdmin?"Réglages":"Profil"},
+    {id:"home",icon:"H",label:"Accueil"},
+    {id:"calendar",icon:"C",label:"Planning"},
+    {id:"board",icon:"T",label:"Tableau"},
+    {id:"history",icon:"R",label:"Historique"},
+    {id:"settings",icon:"S",label:canAdmin?"Reglages":"Profil"},
   ];
   return(
-    <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-100 z-40 pb-safe" style={{paddingBottom:"env(safe-area-inset-bottom)"}}>
+    <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-100 z-40" style={{paddingBottom:"env(safe-area-inset-bottom)"}}>
       <div className="flex">
         {tabs.map(t=>(
-          <button key={t.id} onClick={()=>setTab(t.id)} className={`flex-1 flex flex-col items-center py-2.5 gap-0.5 relative transition ${tab===t.id?"text-indigo-600":"text-slate-400 hover:text-slate-600"}`}>
+          <button key={t.id} onClick={()=>setTab(t.id)} className={`flex-1 flex flex-col items-center py-2.5 gap-0.5 relative transition ${tab===t.id?"text-indigo-600":"text-slate-400"}`}>
             {t.id==="settings"&&pendingCount>0&&canAdmin&&<span className="absolute top-1.5 right-1/2 translate-x-3 -translate-y-0.5 w-4 h-4 bg-red-500 text-white text-[9px] font-bold rounded-full flex items-center justify-center">{pendingCount}</span>}
-            <span className="text-xl leading-none">{t.icon}</span>
+            <span className="text-xl leading-none">{t.icon==="H"?"🏠":t.icon==="C"?"📅":t.icon==="T"?"📋":t.icon==="R"?"🔍":"⚙️"}</span>
             <span className={`text-[10px] font-semibold ${tab===t.id?"text-indigo-600":"text-slate-400"}`}>{t.label}</span>
             {tab===t.id&&<span className="absolute bottom-0 left-1/2 -translate-x-1/2 w-8 h-0.5 bg-indigo-600 rounded-full"/>}
           </button>
         ))}
       </div>
     </nav>
-  );
-}
-
-// ── PAGE WRAPPER ─────────────────────────────────────────────────
-function PageWrapper({children,title,subtitle,right,noPad=false,dark=false}){
-  return(
-    <div className="flex flex-col h-screen">
-      <div className={`${dark?"bg-indigo-900":"bg-white border-b border-slate-100"} px-4 pt-12 pb-4 sticky top-0 z-30`}>
-        <div className="flex items-end justify-between">
-          <div><h1 className={`font-bold text-xl ${dark?"text-white":"text-slate-900"}`}>{title}</h1>{subtitle&&<p className={`text-sm mt-0.5 ${dark?"text-indigo-300":"text-slate-400"}`}>{subtitle}</p>}</div>
-          {right&&<div>{right}</div>}
-        </div>
-      </div>
-      <div className={`flex-1 overflow-y-auto hide-scroll ${noPad?"":"p-4"} pb-24`}>{children}</div>
-    </div>
   );
 }
 
@@ -282,7 +254,7 @@ function Modal({children,onClose}){
 function LoginScreen({users,onLogin}){
   const [u,setU]=useState(""),[p,setP]=useState(""),[err,setE]=useState(""),[loading,setL]=useState(false);
   async function go(){setE("");setL(true);await new Promise(r=>setTimeout(r,300));const found=users.find(x=>x.username===u.trim()&&x.password===p);if(found){localStorage.setItem("lv_session",JSON.stringify(found));onLogin(found);}else{setE("Identifiant ou mot de passe incorrect.");setL(false);}}
-  const ROLE_ICONS={admin:"👑",manager:"📋",tech:"🔧"},ROLE_LABELS={admin:"Administrateur",manager:"Manager",tech:"Technicien"};
+  const ROLE_LABELS={admin:"Administrateur",manager:"Manager",tech:"Technicien"};
   return(
     <div className="min-h-screen bg-gradient-to-br from-indigo-900 via-indigo-800 to-violet-900 flex flex-col items-center justify-center p-6">
       <div className="mb-8 text-center">
@@ -293,8 +265,7 @@ function LoginScreen({users,onLogin}){
       <div className="w-full max-w-sm space-y-3">
         <p className="text-indigo-300 text-xs font-semibold uppercase tracking-wider text-center mb-4">Choisissez votre profil</p>
         {users.map(usr=>(
-          <button key={usr.id} onClick={()=>setU(usr.username)} className={`w-full flex items-center gap-4 p-4 rounded-2xl border-2 transition text-left ${u===usr.username?"border-white bg-white/20":"border-white/20 bg-white/5 hover:bg-white/10"}`}>
-            <span className="text-2xl">{ROLE_ICONS[usr.role]}</span>
+          <button key={usr.id} onClick={()=>setU(usr.username)} className={`w-full flex items-center gap-4 p-4 rounded-2xl border-2 transition text-left ${u===usr.username?"border-white bg-white/20":"border-white/20 bg-white/5"}`}>
             <div className="flex-1"><p className={`font-semibold ${u===usr.username?"text-white":"text-white/80"}`}>{usr.name}</p><p className="text-xs text-indigo-300">{ROLE_LABELS[usr.role]}</p></div>
             {u===usr.username&&<span className="text-white font-bold text-lg">✓</span>}
           </button>
@@ -303,7 +274,7 @@ function LoginScreen({users,onLogin}){
           <div className="mt-2 space-y-3 fade-in">
             <input type="password" value={p} onChange={e=>setP(e.target.value)} onKeyDown={e=>e.key==="Enter"&&go()} placeholder="Mot de passe" className="w-full bg-white/10 border border-white/20 rounded-2xl px-4 py-3.5 text-white placeholder-indigo-300 text-sm focus:outline-none focus:border-white focus:bg-white/15"/>
             {err&&<p className="text-red-300 text-sm text-center">{err}</p>}
-            <button onClick={go} disabled={loading} className="w-full bg-white text-indigo-700 font-bold py-3.5 rounded-2xl text-sm hover:bg-indigo-50 transition disabled:opacity-50">{loading?"Connexion...":"Se connecter →"}</button>
+            <button onClick={go} disabled={loading} className="w-full bg-white text-indigo-700 font-bold py-3.5 rounded-2xl text-sm disabled:opacity-50">{loading?"Connexion...":"Se connecter"}</button>
           </div>
         )}
       </div>
@@ -312,7 +283,7 @@ function LoginScreen({users,onLogin}){
 }
 
 // ── HOME SCREEN ──────────────────────────────────────────────────
-function HomeScreen({storage,users,currentUser,onMissionClick,onNewMission,calDate,setCalDate,setTab,pendingCount=0,onValidation}){
+function HomeScreen({storage,users,currentUser,onMissionClick,onNewMission,setTab,pendingCount=0,pendingMissions=[],onValidation}){
   const todayS=today();
   const allM=visibleMissions(Object.values(storage).flat(),currentUser).filter(isApproved);
   const todayM=visibleMissions(forDate(storage,todayS),currentUser).filter(isApproved).filter(m=>m.status!=="cancelled");
@@ -320,57 +291,51 @@ function HomeScreen({storage,users,currentUser,onMissionClick,onNewMission,calDa
   const stats=Object.fromEntries(Object.keys(STATUS).map(k=>[k,allM.filter(m=>m.status===k).length]));
   const upcoming=allM.filter(m=>m.date>todayS&&m.status!=="done"&&m.status!=="cancelled").sort((a,b)=>a.date.localeCompare(b.date)).slice(0,5);
   const hour=new Date().getHours();
-  const greeting=hour<12?"Bonjour":hour<18?"Bon après-midi":"Bonsoir";
+  const greeting=hour<12?"Bonjour":hour<18?"Bon apres-midi":"Bonsoir";
   const firstName=currentUser.name.split(" ")[0];
 
   return(
     <div className="min-h-screen bg-slate-50">
-      {/* Header gradient */}
       <div className="bg-gradient-to-br from-indigo-900 to-violet-800 px-4 pt-12 pb-8">
         <p className="text-indigo-300 text-sm font-medium">{greeting},</p>
-        <h1 className="text-white text-2xl font-bold mt-0.5">{firstName} 👋</h1>
+        <h1 className="text-white text-2xl font-bold mt-0.5">{firstName}</h1>
         <p className="text-indigo-300 text-xs mt-1">{new Date().toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long"})}</p>
-        {/* Stats row — today focused */}
         <div className="grid grid-cols-3 gap-2 mt-5">
           <div className="bg-white/10 rounded-2xl p-3 text-center">
             <div className="text-2xl font-bold text-white">{todayM.length}</div>
-            <div className="text-xs text-indigo-300 mt-0.5 font-medium">Aujourd'hui</div>
+            <div className="text-[10px] text-indigo-300 mt-0.5 font-medium">Aujourd'hui</div>
           </div>
           <div className="bg-white/10 rounded-2xl p-3 text-center">
             <div className="text-2xl font-bold text-white">{stats["inprogress"]||0}</div>
-            <div className="text-xs text-indigo-300 mt-0.5 font-medium">En cours</div>
+            <div className="text-[10px] text-indigo-300 mt-0.5 font-medium">En cours</div>
           </div>
           <div className="bg-white/10 rounded-2xl p-3 text-center">
             <div className="text-2xl font-bold text-amber-300">{urgent.length||0}</div>
-            <div className="text-xs text-indigo-300 mt-0.5 font-medium">Urgentes</div>
+            <div className="text-[10px] text-indigo-300 mt-0.5 font-medium">Urgentes</div>
           </div>
         </div>
       </div>
 
       <div className="p-4 space-y-5 pb-28">
-        {/* Validation pending — admin sees clickable cards */}
-        {(currentUser.role==="admin")&&pendingCount>0&&(
+        {(currentUser.role==="admin"||currentUser.adminAccess)&&pendingCount>0&&(
           <div>
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-2">
-                <span className="text-lg">⏳</span>
-                <h2 className="font-bold text-slate-800">À valider</h2>
+                <h2 className="font-bold text-slate-800">A valider</h2>
                 <span className="bg-violet-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">{pendingCount}</span>
               </div>
-              <button onClick={onValidation} className="text-xs text-violet-500 font-semibold">Tout voir →</button>
+              <button onClick={onValidation} className="text-xs text-violet-500 font-semibold">Tout voir</button>
             </div>
             <div className="space-y-2">
-              {Object.values(storage).flat().filter(m=>m.approved===false).slice(0,5).map(m=>(
+              {pendingMissions.slice(0,5).map(m=>(
                 <MissionCard key={m.id} m={m} users={users} onClick={()=>onMissionClick(m)} compact/>
               ))}
             </div>
           </div>
         )}
 
-        {/* Urgent alert */}
         {urgent.length>0&&(
           <div className="bg-red-50 border border-red-200 rounded-2xl p-4 flex items-center gap-3">
-            <span className="text-2xl">🚨</span>
             <div className="flex-1">
               <p className="font-bold text-red-700 text-sm">{urgent.length} urgente{urgent.length>1?"s":""} en cours</p>
               <p className="text-xs text-red-500 mt-0.5">Action requise</p>
@@ -379,33 +344,30 @@ function HomeScreen({storage,users,currentUser,onMissionClick,onNewMission,calDa
           </div>
         )}
 
-        {/* Today */}
         <div>
           <div className="flex items-center justify-between mb-3">
             <h2 className="font-bold text-slate-800">Aujourd'hui</h2>
-            <button onClick={()=>setTab("calendar")} className="text-xs text-indigo-500 font-semibold">Voir planning →</button>
+            <button onClick={()=>setTab("calendar")} className="text-xs text-indigo-500 font-semibold">Voir planning</button>
           </div>
           {todayM.length===0
-            ?<div className="bg-white rounded-2xl p-6 text-center border border-slate-100 shadow-sm"><p className="text-3xl mb-2">🌟</p><p className="text-slate-500 text-sm font-medium">Aucune intervention aujourd'hui</p></div>
+            ?<div className="bg-white rounded-2xl p-6 text-center border border-slate-100 shadow-sm"><p className="text-slate-500 text-sm font-medium">Aucune intervention aujourd'hui</p></div>
             :<div className="space-y-2">{todayM.map(m=><MissionCard key={m.id} m={m} users={users} onClick={()=>onMissionClick(m)} compact/>)}</div>
           }
         </div>
 
-        {/* Upcoming */}
         {upcoming.length>0&&(
           <div>
             <div className="flex items-center justify-between mb-3">
-              <h2 className="font-bold text-slate-800">À venir</h2>
-              <button onClick={()=>setTab("calendar")} className="text-xs text-indigo-500 font-semibold">Tout voir →</button>
+              <h2 className="font-bold text-slate-800">A venir</h2>
+              <button onClick={()=>setTab("calendar")} className="text-xs text-indigo-500 font-semibold">Tout voir</button>
             </div>
             <div className="space-y-2">{upcoming.map(m=><MissionCard key={m.id} m={m} users={users} onClick={()=>onMissionClick(m)} compact/>)}</div>
           </div>
         )}
 
-        {/* Quick add */}
         {(currentUser.role==="admin"||currentUser.role==="manager")&&(
-          <button onClick={onNewMission} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-4 rounded-2xl text-sm flex items-center justify-center gap-2 shadow-lg shadow-indigo-200 transition">
-            <span className="text-lg">+</span> Nouvelle intervention
+          <button onClick={onNewMission} className="w-full bg-indigo-600 text-white font-bold py-4 rounded-2xl text-sm flex items-center justify-center gap-2 shadow-lg shadow-indigo-200">
+            + Nouvelle intervention
           </button>
         )}
       </div>
@@ -415,7 +377,6 @@ function HomeScreen({storage,users,currentUser,onMissionClick,onNewMission,calDa
 
 // ── YEAR VIEW ─────────────────────────────────────────────────────
 function YearView({year,storage,currentUser,onDayClick}){
-  const allM=visibleMissions(Object.values(storage).flat(),currentUser);
   const todayS=today();
   return(
     <div className="grid grid-cols-3 gap-3 p-3">
@@ -463,21 +424,20 @@ function CalendarScreen({year,month,storage,currentUser,users,selectedDate,onDay
 
   return(
     <div className="flex flex-col h-screen bg-slate-50">
-      {/* Header */}
       <div className="bg-indigo-900 text-white px-4 pt-10 pb-3 sticky top-0 z-30">
         <div className="flex items-center justify-between mb-3">
           <h1 className="font-bold text-lg">Planning</h1>
           <div className="flex items-center gap-2">
-            <button onClick={()=>setView(v=>v==="month"?"year":"month")} className={`text-xs font-bold px-3 py-1.5 rounded-xl transition ${view==="year"?"bg-white text-indigo-700":"bg-white/20 text-white"}`}>{view==="month"?"Vue année":"Vue mois"}</button>
-            <button onClick={onExport} className="text-xs font-bold px-3 py-1.5 rounded-xl bg-white/20 text-white">📤 .ics</button>
+            <button onClick={()=>setView(v=>v==="month"?"year":"month")} className={`text-xs font-bold px-3 py-1.5 rounded-xl transition ${view==="year"?"bg-white text-indigo-700":"bg-white/20 text-white"}`}>{view==="month"?"Vue annee":"Vue mois"}</button>
+            <button onClick={onExport} className="text-xs font-bold px-3 py-1.5 rounded-xl bg-white/20 text-white">.ics</button>
           </div>
         </div>
         {view==="month"&&(
           <>
             <div className="flex items-center justify-between mb-2">
-              <button onClick={onPrev} className="w-8 h-8 flex items-center justify-center rounded-xl bg-white/10 text-white hover:bg-white/20 text-xl">‹</button>
+              <button onClick={onPrev} className="w-8 h-8 flex items-center justify-center rounded-xl bg-white/10 text-white text-xl">‹</button>
               <p className="font-bold text-base">{MONTHS_FR[month]} {year}</p>
-              <button onClick={onNext} className="w-8 h-8 flex items-center justify-center rounded-xl bg-white/10 text-white hover:bg-white/20 text-xl">›</button>
+              <button onClick={onNext} className="w-8 h-8 flex items-center justify-center rounded-xl bg-white/10 text-white text-xl">›</button>
             </div>
             <div className="grid grid-cols-7">{DAYS_FR.map((d,i)=><div key={i} className="text-center text-[11px] text-indigo-300 font-medium py-1">{d}</div>)}</div>
           </>
@@ -496,10 +456,9 @@ function CalendarScreen({year,month,storage,currentUser,users,selectedDate,onDay
           ?<YearView year={year} storage={storage} currentUser={currentUser} onDayClick={d=>{onDayClick(d);setView("month");}}/>
           :(
             <>
-              {/* Calendar grid */}
               <div className="bg-white grid grid-cols-7 shadow-sm">
                 {cells.map((day,i)=>{
-                  if(!day)return <div key={"e"+i} className="min-h-[52px] border-b border-r border-slate-50 last:border-r-0"/>;
+                  if(!day)return <div key={"e"+i} className="border-b border-r border-slate-50 last:border-r-0"/>;
                   const ds=`${year}-${padM(month)}-${String(day).padStart(2,"0")}`;
                   const dm=visibleMissions(forDate(storage,ds),currentUser);
                   const approved=dm.filter(isApproved),pending=dm.filter(m=>m.approved===false);
@@ -508,40 +467,37 @@ function CalendarScreen({year,month,storage,currentUser,users,selectedDate,onDay
                   const total=approved.length+(currentUser.role!=="tech"?pending.length:0);
                   const firstM=approved.filter(m=>m.status!=="cancelled")[0];
                   return(
-                    <button key={day} onClick={()=>onDayClick(ds)} className={`flex flex-col items-center pt-1.5 pb-1.5 px-0.5 transition border-b border-r border-slate-50 last:border-r-0 relative ${isSel?"bg-indigo-50":isT?"":"hover:bg-slate-50"}`} style={{minHeight:total>0?72:52}}>
+                    <button key={day} onClick={()=>onDayClick(ds)} className={`flex flex-col items-center pt-1.5 pb-1.5 px-0.5 transition border-b border-r border-slate-50 last:border-r-0 relative ${isSel?"bg-indigo-50":""}`} style={{minHeight:total>0?72:52}}>
                       {hasU&&<span style={{position:"absolute",top:2,right:2,fontSize:8,color:"#ef4444",fontWeight:900}}>!</span>}
                       {pending.length>0&&currentUser.role!=="tech"&&<span style={{position:"absolute",top:3,left:3,width:6,height:6,borderRadius:"50%",background:"#a78bfa",display:"inline-block"}}/>}
                       <span className={`w-7 h-7 flex items-center justify-center text-[13px] rounded-full font-semibold ${isT?"bg-indigo-600 text-white":isSel?"bg-indigo-100 text-indigo-700":"text-slate-700"}`}>{day}</span>
-                      {firstM&&<p style={{fontSize:8,color:STATUS[firstM.status]?.col?"#6366f1":"#64748b",fontWeight:600,width:"100%",textAlign:"center",overflow:"hidden",whiteSpace:"nowrap",textOverflow:"ellipsis",lineHeight:1.3,marginTop:2,padding:"0 1px"}}>{firstM.title}</p>}
+                      {firstM&&<p style={{fontSize:8,color:"#64748b",fontWeight:600,width:"100%",textAlign:"center",overflow:"hidden",whiteSpace:"nowrap",textOverflow:"ellipsis",lineHeight:1.3,marginTop:2,padding:"0 1px"}}>{firstM.title}</p>}
                       {total>1&&<p style={{fontSize:7,color:"#94a3b8",fontWeight:600,marginTop:1}}>+{total-1}</p>}
                     </button>
                   );
                 })}
               </div>
 
-              {/* Day panel */}
               <div className="p-4 space-y-3">
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="font-bold text-slate-800 capitalize">{fmtLong(selectedDate)}</p>
                     {dayMissions.length>0&&<p className="text-xs text-slate-400">{dayMissions.length} intervention{dayMissions.length>1?"s":""}</p>}
                   </div>
-                  {canCreate&&<button onClick={()=>onNewMission(selectedDate)} className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-3 py-2 rounded-xl transition shadow-sm">+ Nouvelle</button>}
+                  {canCreate&&<button onClick={()=>onNewMission(selectedDate)} className="flex items-center gap-1.5 bg-indigo-600 text-white text-xs font-bold px-3 py-2 rounded-xl shadow-sm">+ Nouvelle</button>}
                 </div>
 
                 {[...pendingDay,...dayMissions].length===0&&(
                   <div className="bg-white rounded-2xl p-8 text-center border border-slate-100 shadow-sm">
-                    <p className="text-3xl mb-2">📋</p>
                     <p className="text-slate-500 font-medium text-sm">Aucune intervention</p>
-                    {canCreate&&<p className="text-slate-300 text-xs mt-1">Appuyez sur + Nouvelle</p>}
                   </div>
                 )}
 
                 {pendingDay.length>0&&currentUser.role!=="tech"&&(
                   <div className="bg-violet-50 border border-violet-200 rounded-2xl p-3">
                     <div className="flex items-center justify-between mb-2">
-                      <p className="text-xs font-bold text-violet-600">⏳ {pendingDay.length} en attente</p>
-                      {currentUser.role==="admin"&&<button onClick={onValidateAll} className="text-[11px] font-bold text-white bg-violet-500 px-2.5 py-1 rounded-lg">Valider →</button>}
+                      <p className="text-xs font-bold text-violet-600">{pendingDay.length} en attente</p>
+                      {(currentUser.role==="admin"||currentUser.adminAccess)&&<button onClick={onValidateAll} className="text-[11px] font-bold text-white bg-violet-500 px-2.5 py-1 rounded-lg">Valider</button>}
                     </div>
                     {pendingDay.map(m=><MissionCard key={m.id} m={m} users={users} onClick={()=>onMissionClick(m)} compact/>)}
                   </div>
@@ -567,7 +523,7 @@ function BoardScreen({storage,users,currentUser,onMissionClick,onNewMission,onSt
   useEffect(()=>{
     (async()=>{
       const now=new Date(),promises=[];
-      for(let i=1;i<=5;i++){const d=shiftMonth(now.getFullYear(),now.getMonth(),-i);promises.push(st.get(mkKey(d.y,d.m)));}
+      for(let i=-6;i<=6;i++){if(i===0)continue;const d=shiftMonth(now.getFullYear(),now.getMonth(),i);promises.push(st.get(mkKey(d.y,d.m)));}
       const results=await Promise.all(promises);
       const flat=results.filter(Boolean).flatMap(r=>Object.values(normMissions(r)).flat());
       setExtraM(flat);
@@ -575,11 +531,12 @@ function BoardScreen({storage,users,currentUser,onMissionClick,onNewMission,onSt
   },[]);
 
   const combined=[...Object.values(storage).flat(),...extraM];
-  const seen=new Set(); const deduped=combined.filter(m=>{if(seen.has(m.id))return false;seen.add(m.id);return true;});
+  const seen=new Set();const deduped=combined.filter(m=>{if(seen.has(m.id))return false;seen.add(m.id);return true;});
   const allM=visibleMissions(deduped,currentUser).filter(isApproved);
-  const locations=BUILDINGS_LIST.filter(b=>b!=='CUSTOM');
-  const filtered=filterLoc==="all"?allM:allM.filter(m=>(m.location||'').trim()===filterLoc);
+  const locations=BUILDINGS_LIST.filter(b=>b!=="CUSTOM");
+  const filtered=filterLoc==="all"?allM:allM.filter(m=>(m.location||"").trim()===filterLoc);
   const cols=["todo","inprogress","done","cancelled"];
+
   return(
     <div className="flex flex-col h-screen bg-slate-50">
       <div className="bg-indigo-900 text-white px-4 pt-10 pb-4 sticky top-0 z-30">
@@ -587,55 +544,34 @@ function BoardScreen({storage,users,currentUser,onMissionClick,onNewMission,onSt
           <h1 className="font-bold text-lg">Tableau Kanban</h1>
           {(currentUser.role==="admin"||currentUser.role==="manager")&&<button onClick={onNewMission} className="bg-white/20 text-white text-xs font-bold px-3 py-1.5 rounded-xl">+ Nouvelle</button>}
         </div>
-        <div className="flex gap-2">
-          <select value={filterLoc} onChange={e=>setFilterLoc(e.target.value)} className="flex-1 bg-white/10 border border-white/20 text-white text-xs rounded-xl px-3 py-2 focus:outline-none">
-            <option value="all" className="text-slate-800">📍 Tous les lieux</option>
-            {locations.map(l=><option key={l} value={l} className="text-slate-800">{l.length>35?l.slice(0,35)+"…":l}</option>)}
-          </select>
-        </div>
-        <p className="text-indigo-300 text-[10px] mt-1">Chargement de 6 mois d'interventions · {allM.length} au total</p>
+        <select value={filterLoc} onChange={e=>setFilterLoc(e.target.value)} className="w-full bg-white/10 border border-white/20 text-white text-xs rounded-xl px-3 py-2 focus:outline-none">
+          <option value="all" className="text-slate-800">Tous les lieux</option>
+          {locations.map(l=><option key={l} value={l} className="text-slate-800">{l.length>35?l.slice(0,35)+"...":l}</option>)}
+        </select>
       </div>
       <div className="flex-1 overflow-x-auto hide-scroll pb-24" style={{height:"calc(100vh - 180px)"}}>
         <div className="flex gap-3 p-4" style={{minWidth:`${cols.length*272}px`,height:"100%"}}>
           {cols.map(status=>{
             const s=STATUS_CSS[status]||STATUS_CSS.todo;
-            const sT=STATUS[status]||STATUS.todo;
             const items=filtered.filter(m=>m.status===status).sort((a,b)=>b.date.localeCompare(a.date));
             const isOver=dragOver===status;
             const canDrop=dragging&&dragging.status!==status;
             return(
-              <div key={status}
-                style={{width:260,flexShrink:0,display:"flex",flexDirection:"column"}}
+              <div key={status} style={{width:260,flexShrink:0,display:"flex",flexDirection:"column"}}
                 onDragOver={e=>{e.preventDefault();if(canDrop)setDragOver(status);}}
                 onDragLeave={e=>{if(!e.currentTarget.contains(e.relatedTarget))setDragOver(null);}}
-                onDrop={e=>{
-                  e.preventDefault();
-                  if(dragging&&dragging.status!==status){
-                    onStatusChange(dragging,status);
-                  }
-                  setDragging(null);setDragOver(null);
-                }}
+                onDrop={e=>{e.preventDefault();if(dragging&&dragging.status!==status){onStatusChange(dragging,status);}setDragging(null);setDragOver(null);}}
               >
-                {/* Column header */}
-                <div style={{display:"flex",alignItems:"center",gap:8,padding:"10px 14px",borderRadius:16,marginBottom:12,background:s.bg,border:`1px solid ${isOver?"#6366f1":"#e2e8f0"}`,flexShrink:0,transition:"border-color 0.15s"}}>
+                <div style={{display:"flex",alignItems:"center",gap:8,padding:"10px 14px",borderRadius:16,marginBottom:12,background:s.bg,border:`1px solid ${isOver?"#6366f1":"#e2e8f0"}`,flexShrink:0}}>
                   <span style={{width:10,height:10,borderRadius:"50%",background:s.dot,display:"inline-block"}}/>
                   <span style={{fontSize:13,fontWeight:700,color:s.text}}>{s.label}</span>
                   <span style={{marginLeft:"auto",fontSize:11,fontWeight:700,color:s.text,opacity:0.7}}>{items.length}</span>
                 </div>
-                {/* Drop zone highlight */}
-                {isOver&&canDrop&&<div style={{border:"2px dashed #6366f1",borderRadius:16,padding:12,marginBottom:8,textAlign:"center",background:"rgba(99,102,241,0.05)"}}>
-                  <p style={{fontSize:12,color:"#6366f1",fontWeight:600}}>↓ Déposer ici</p>
-                </div>}
-                {/* Cards */}
+                {isOver&&canDrop&&<div style={{border:"2px dashed #6366f1",borderRadius:16,padding:12,marginBottom:8,textAlign:"center",background:"rgba(99,102,241,0.05)"}}><p style={{fontSize:12,color:"#6366f1",fontWeight:600}}>Deposer ici</p></div>}
                 <div style={{display:"flex",flexDirection:"column",gap:8,overflowY:"auto",flex:1,paddingBottom:16}}>
                   {items.length===0&&!isOver&&<div style={{background:"rgba(255,255,255,0.6)",borderRadius:16,padding:16,textAlign:"center",border:"1px solid #f1f5f9"}}><p style={{fontSize:12,color:"#cbd5e1"}}>Aucune</p></div>}
                   {items.map(m=>(
-                    <div key={m.id}
-                      draggable={true}
-                      onDragStart={()=>{setDragging(m);}}
-                      onDragEnd={()=>{setDragging(null);setDragOver(null);}}
-                      style={{opacity:dragging?.id===m.id?0.4:1,cursor:"grab",transition:"opacity 0.15s"}}
-                    >
+                    <div key={m.id} draggable={true} onDragStart={()=>setDragging(m)} onDragEnd={()=>{setDragging(null);setDragOver(null);}} style={{opacity:dragging?.id===m.id?0.4:1,cursor:"grab"}}>
                       <BoardCard m={m} users={users} onClick={()=>onMissionClick(m)}/>
                     </div>
                   ))}
@@ -653,10 +589,11 @@ function BoardScreen({storage,users,currentUser,onMissionClick,onNewMission,onSt
 function HistoryScreen({currentUser,users}){
   const [loading,setLoading]=useState(true),[all,setAll]=useState([]);
   const [filterLoc,setFL]=useState("all"),[filterStatus,setFS]=useState("all"),[search,setSearch]=useState(""),[showS,setShowS]=useState(false);
-  const [filterMonth,setFMonth]=useState("all"),[dateFrom,setDateFrom]=useState(""),[dateTo,setDateTo]=useState("");
+  const [filterMonth,setFMonth]=useState("all");
   useEffect(()=>{(async()=>{const now=new Date(),promises=[];for(let i=0;i<18;i++){const d=shiftMonth(now.getFullYear(),now.getMonth(),-i);promises.push(st.get(mkKey(d.y,d.m)));}const results=await Promise.all(promises);const flat=results.filter(Boolean).flatMap(r=>Object.values(normMissions(r)).flat()).filter(isApproved);const seen=new Set();const unique=flat.filter(m=>{if(seen.has(m.id))return false;seen.add(m.id);return true;});unique.sort((a,b)=>b.date.localeCompare(a.date));setAll(unique);setLoading(false);})();},[]);
   const role=visibleMissions(all,currentUser);
   const locs=BUILDINGS_LIST.filter(b=>b!=="CUSTOM");
+  const months=[...new Set(role.filter(r=>r&&r.date).map(r=>r.date.slice(0,7)))].sort().reverse();
   const filtered=role.filter(m=>{
     if(filterStatus!=="all"&&m.status!==filterStatus)return false;
     if(filterLoc!=="all"&&(m.location||"").trim()!==filterLoc)return false;
@@ -664,64 +601,63 @@ function HistoryScreen({currentUser,users}){
     if(search){const q=search.toLowerCase();if(!m.title.toLowerCase().includes(q)&&!(m.description||"").toLowerCase().includes(q)&&!(m.location||"").toLowerCase().includes(q))return false;}
     return true;
   });
-  // Build month options from loaded data
-  const months=[...new Set(role.filter(r=>r&&r.date).map(r=>r.date.slice(0,7)))].sort().reverse();
-  const byLoc={};filtered.forEach(m=>{const l=m.location||"Non précisé";if(!byLoc[l])byLoc[l]={count:0,done:0};byLoc[l].count++;if(m.status==="done")byLoc[l].done++;});
+  const byLoc={};filtered.forEach(m=>{const l=m.location||"Non precise";if(!byLoc[l])byLoc[l]={count:0,done:0};byLoc[l].count++;if(m.status==="done")byLoc[l].done++;});
   const summary=Object.entries(byLoc).sort((a,b)=>b[1].count-a[1].count);
-  function exportFiltered(){if(!filtered.length){alert("Aucune intervention à exporter.");return;}downloadICS(buildICS(filtered,users),`beylev-historique-${today()}.ics`);}
+  function exportFiltered(){if(!filtered.length){alert("Aucune intervention.");return;}downloadICS(buildICS(filtered,users),`beylev-historique-${today()}.ics`);}
   return(
     <div className="flex flex-col h-screen bg-slate-50">
       <div className="bg-indigo-900 text-white px-4 pt-10 pb-4 sticky top-0 z-30">
         <div className="flex items-center justify-between mb-3">
           <h1 className="font-bold text-lg">Historique</h1>
-          <button onClick={exportFiltered} className="bg-white/20 text-white text-xs font-bold px-3 py-1.5 rounded-xl">📤 .ics</button>
+          <button onClick={exportFiltered} className="bg-white/20 text-white text-xs font-bold px-3 py-1.5 rounded-xl">.ics</button>
         </div>
-        <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="🔍 Rechercher..." className="w-full bg-white/10 border border-white/20 text-white placeholder-indigo-300 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-white mb-2"/>
-        <div className="flex gap-2">
+        <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Rechercher..." className="w-full bg-white/10 border border-white/20 text-white placeholder-indigo-300 rounded-xl px-4 py-2.5 text-sm focus:outline-none mb-2"/>
+        <div className="flex gap-2 mb-2">
           <select value={filterLoc} onChange={e=>setFL(e.target.value)} className="flex-1 bg-white/10 border border-white/20 text-white text-xs rounded-xl px-3 py-2 focus:outline-none">
-            <option value="all" className="text-slate-800">📍 Tous les lieux</option>
-            {locs.map(l=><option key={l} value={l} className="text-slate-800">{l.length>28?l.slice(0,28)+"…":l}</option>)}
+            <option value="all" className="text-slate-800">Tous les lieux</option>
+            {locs.map(l=><option key={l} value={l} className="text-slate-800">{l.length>28?l.slice(0,28)+"...":l}</option>)}
           </select>
           <select value={filterStatus} onChange={e=>setFS(e.target.value)} className="flex-1 bg-white/10 border border-white/20 text-white text-xs rounded-xl px-3 py-2 focus:outline-none">
             <option value="all" className="text-slate-800">Tous statuts</option>
             {Object.entries(STATUS).map(([k,v])=><option key={k} value={k} className="text-slate-800">{v.label}</option>)}
           </select>
         </div>
-        <div className="flex gap-2">
-          <select value={filterMonth} onChange={e=>setFMonth(e.target.value)} className="flex-1 bg-white/10 border border-white/20 text-white text-xs rounded-xl px-3 py-2 focus:outline-none">
-            <option value="all" className="text-slate-800">📅 Tous les mois</option>
-            {months.map(mo=><option key={mo} value={mo} className="text-slate-800">{mo}</option>)}
-          </select>
-          <select value={filterMonth==="all"?"":filterMonth} onChange={e=>setFMonth(e.target.value||"all")} className="flex-1 bg-white/10 border border-white/20 text-white text-xs rounded-xl px-3 py-2 focus:outline-none">
-            <option value="">📆 Mois précis</option>
-            {months.map(mo=><option key={"b"+mo} value={mo} className="text-slate-800">{mo}</option>)}
-          </select>
-        </div>
+        <select value={filterMonth} onChange={e=>setFMonth(e.target.value)} className="w-full bg-white/10 border border-white/20 text-white text-xs rounded-xl px-3 py-2 focus:outline-none">
+          <option value="all" className="text-slate-800">Tous les mois</option>
+          {months.map(mo=><option key={mo} value={mo} className="text-slate-800">{mo}</option>)}
+        </select>
       </div>
       <div className="flex-1 overflow-y-auto hide-scroll p-4 space-y-3 pb-24">
         <div className="flex items-center justify-between">
-          <p className="text-sm font-semibold text-slate-600">{filtered.length} intervention{filtered.length!==1?"s":""}</p>
-          <button onClick={()=>setShowS(v=>!v)} className="text-xs font-bold text-indigo-600 bg-indigo-50 border border-indigo-200 px-3 py-1.5 rounded-xl">{showS?"Masquer":"📊 Facturation"}</button>
+          <p style={{color:"#475569",fontSize:14,fontWeight:600}}>{filtered.length} intervention{filtered.length!==1?"s":""}</p>
+          <button onClick={()=>setShowS(v=>!v)} className="text-xs font-bold text-indigo-600 bg-indigo-50 border border-indigo-200 px-3 py-1.5 rounded-xl">{showS?"Masquer":"Facturation"}</button>
         </div>
-        {showS&&<div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-          <div className="bg-indigo-50 px-4 py-3 border-b border-indigo-100"><p className="text-xs font-bold text-indigo-700 uppercase tracking-widest">Résumé par immeuble</p></div>
-          <div className="divide-y divide-slate-50">
-            {summary.map(([loc,d])=><div key={loc} className="flex items-center px-4 py-3 gap-3"><div className="flex-1 min-w-0"><p className="text-xs font-semibold text-slate-700 truncate">📍 {loc}</p><p className="text-xs text-slate-400">{d.done}/{d.count} terminées</p></div><div className="text-right"><p className="text-xl font-bold text-slate-800">{d.count}</p><p className="text-[9px] text-slate-400 uppercase">interv.</p></div></div>)}
-            <div className="flex items-center justify-between px-4 py-3 bg-slate-50"><p className="text-sm font-bold text-slate-700">Total</p><p className="text-sm font-bold text-slate-800">{filtered.length} interventions</p></div>
+        {showS&&summary.length>0&&(
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+            <div className="bg-indigo-50 px-4 py-3 border-b border-indigo-100"><p className="text-xs font-bold text-indigo-700 uppercase tracking-widest">Resume par immeuble</p></div>
+            <div className="divide-y divide-slate-50">
+              {summary.map(([loc,d])=>(
+                <div key={loc} className="flex items-center px-4 py-3 gap-3">
+                  <div className="flex-1 min-w-0"><p className="text-xs font-semibold text-slate-700 truncate">{loc}</p><p className="text-[10px] text-slate-400">{d.done}/{d.count} terminees</p></div>
+                  <div className="text-right"><p style={{fontSize:20,fontWeight:700,color:"#1e293b"}}>{d.count}</p><p className="text-[9px] text-slate-400 uppercase">interv.</p></div>
+                </div>
+              ))}
+              <div className="flex items-center justify-between px-4 py-3 bg-slate-50"><p className="text-sm font-bold text-slate-700">Total</p><p className="text-sm font-bold text-slate-800">{filtered.length}</p></div>
+            </div>
           </div>
-        </div>}
-        {loading?<div className="text-center py-16 text-slate-400">Chargement...</div>:null}
-        {!loading&&filtered.length===0&&<div className="text-center py-16"><p className="text-4xl mb-3">🔍</p><p className="text-slate-500">Aucune intervention trouvée</p></div>}
+        )}
+        {loading&&<div className="text-center py-16 text-slate-400">Chargement...</div>}
+        {!loading&&filtered.length===0&&<div className="text-center py-16"><p className="text-slate-500">Aucune intervention</p></div>}
         {filtered.map(m=>{
           const a=getUser(users,m.assignedTo);
           return(
-            <div key={m.id} className={`bg-white rounded-2xl border p-4 shadow-sm ${m.priority==="urgent"?"border-l-4 border-l-red-400 border-slate-100":"border-slate-100"}`}>
+            <div key={m.id} style={{background:"white",borderRadius:16,border:"1px solid #e2e8f0",padding:16,boxShadow:"0 1px 3px rgba(0,0,0,0.08)",color:"#1e293b"}}>
               <div className="flex items-start gap-3">
                 <div className="flex-1 min-w-0">
-                  <p className="font-semibold text-slate-800 text-sm">{m.title}</p>
-                  {m.location&&<p className="text-xs text-slate-400 truncate mt-0.5">📍 {m.location}</p>}
-                  <p className="text-xs text-slate-400 mt-0.5">📅 {fmtShort(m.date)}{m.dateEnd&&m.dateEnd!==m.date?` → ${fmtShort(m.dateEnd)}`:""}</p>
-                  <div className="mt-2"><StatusBadge status={m.status}/></div>
+                  <p style={{fontWeight:600,fontSize:14,color:"#1e293b",marginBottom:4}}>{m.title}</p>
+                  {m.location&&<p style={{fontSize:11,color:"#94a3b8",marginBottom:3}}>{m.location}</p>}
+                  <p style={{fontSize:11,color:"#94a3b8",marginBottom:8}}>{fmtShort(m.date)}</p>
+                  <StatusBadge status={m.status}/>
                 </div>
                 <Avatar user={a} size="sm"/>
               </div>
@@ -734,47 +670,41 @@ function HistoryScreen({currentUser,users}){
 }
 
 // ── SETTINGS SCREEN ───────────────────────────────────────────────
-function SettingsScreen({currentUser,users,onSave,onLogout,storage}){
+function SettingsScreen({currentUser,users,onSave,onLogout}){
   const [list,setList]=useState(users.map(u=>({...u})));
   const [adding,setAdding]=useState(false),[nu,setNu]=useState({username:"",password:"",name:"",role:"tech",initials:"",email:""});
   const [editPwd,setEP]=useState(null),[newPwd,setNP]=useState("");
   const canAdmin=currentUser.role==="admin"||currentUser.adminAccess;
   const persist=u=>{setList(u);onSave(u);};
   const inp="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white";
-  const RDESC={admin:"Accès complet",manager:"Crée des tâches (validation)",tech:"Voit ses tâches assignées"};
 
   return(
     <div className="flex flex-col h-screen bg-slate-50">
       <div className="bg-indigo-900 text-white px-4 pt-10 pb-5 sticky top-0 z-30">
-        <h1 className="font-bold text-lg">Réglages</h1>
+        <h1 className="font-bold text-lg">Reglages</h1>
         <div className="flex items-center gap-3 mt-3 bg-white/10 rounded-2xl p-3">
           <Avatar user={currentUser} size="md"/>
           <div><p className="font-semibold text-white">{currentUser.name}</p><p className="text-indigo-300 text-xs">{currentUser.role==="admin"?"Administrateur":currentUser.role==="manager"?"Manager":"Technicien"}</p></div>
-          <button onClick={onLogout} className="ml-auto text-xs font-bold text-red-300 bg-red-900/30 px-3 py-1.5 rounded-xl">Déco.</button>
+          <button onClick={onLogout} className="ml-auto text-xs font-bold text-red-300 bg-red-900/30 px-3 py-1.5 rounded-xl">Deco.</button>
         </div>
       </div>
 
       <div className="flex-1 overflow-y-auto hide-scroll p-4 space-y-4 pb-28">
-        {/* Email test */}
-        {canAdmin&&window.__EMAIL_READY&&(
+        {canAdmin&&(
           <div className="bg-blue-50 border border-blue-200 rounded-2xl p-4">
-            <p className="text-sm font-bold text-blue-700 mb-1">📧 Notifications email</p>
+            <p className="text-sm font-bold text-blue-700 mb-1">Notifications email</p>
             <p className="text-xs text-blue-500 mb-3">Testez avant de valider une intervention.</p>
             <button onClick={async()=>{
               const recipients=list.filter(u=>u.email&&u.email.includes("@"));
-              if(!recipients.length){alert("Aucun email renseigné.");return;}
+              if(!recipients.length){alert("Aucun email renseigne.");return;}
               try{
-                  const results=await Promise.all(recipients.map(u=>
-                    fetch("/api/send-email",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({to_email:u.email,to_name:u.name,subject:"✅ Test — Maintenance Beylev",message:"Email de test. Les notifications fonctionnent !",mission_title:"Test",mission_date:new Date().toLocaleDateString("fr-FR"),mission_location:"Test",assigned_to:u.name,created_by:"Système",mission_priority:"Normal",mission_description:"Test",app_url:window.location.href})})
-                  ));
-                  alert("✅ Email envoyé à : "+recipients.map(u=>u.email).join(", "));
-                }
-                catch(e){alert("❌ Erreur : "+(e.message||JSON.stringify(e)));}
-            }} className="w-full bg-blue-500 hover:bg-blue-600 text-white font-bold py-2.5 rounded-xl text-sm">📤 Envoyer un email de test</button>
+                await Promise.all(recipients.map(u=>sendEmailRaw({to_email:u.email,to_name:u.name,subject:"Test - Maintenance Beylev",message:"Email de test. Les notifications fonctionnent !",mission_title:"Test",mission_date:new Date().toLocaleDateString("fr-FR"),mission_location:"Test",assigned_to:u.name,created_by:"Systeme",mission_priority:"Normal",mission_description:"Test",app_url:window.location.href})));
+                alert("Email envoye a : "+recipients.map(u=>u.email).join(", "));
+              }catch(e){alert("Erreur : "+(e.message||JSON.stringify(e)));}
+            }} className="w-full bg-blue-500 text-white font-bold py-2.5 rounded-xl text-sm">Envoyer un email de test</button>
           </div>
         )}
 
-        {/* Users */}
         {canAdmin&&(
           <div>
             <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">Utilisateurs</p>
@@ -784,42 +714,42 @@ function SettingsScreen({currentUser,users,onSave,onLogout,storage}){
                   <div className="flex items-center gap-3 p-4">
                     <Avatar user={u} size="md"/>
                     <div className="flex-1 min-w-0">
-                      <p className="font-semibold text-sm text-slate-800">{u.name}{u.adminAccess&&<span className="ml-1.5 text-amber-500 text-xs">★</span>}</p>
-                      <p className="text-xs text-slate-400">@{u.username} · {u.role==="admin"?"Admin":u.role==="manager"?"Manager":"Tech."}</p>
+                      <p className="font-semibold text-sm text-slate-800">{u.name}{u.adminAccess&&<span className="ml-1.5 text-amber-500 text-xs">*</span>}</p>
+                      <p className="text-xs text-slate-400">@{u.username} - {u.role==="admin"?"Admin":u.role==="manager"?"Manager":"Tech."}</p>
                     </div>
-                    {u.id!==currentUser.id&&<button onClick={()=>{if(window.confirm("Supprimer ?"))persist(list.filter(x=>x.id!==u.id));}} className="w-7 h-7 flex items-center justify-center rounded-full bg-red-50 text-red-400 hover:bg-red-100 text-sm">✕</button>}
+                    {u.id!==currentUser.id&&<button onClick={()=>{if(window.confirm("Supprimer ?"))persist(list.filter(x=>x.id!==u.id));}} className="w-7 h-7 flex items-center justify-center rounded-full bg-red-50 text-red-400 text-sm">✕</button>}
                   </div>
                   <div className="px-4 pb-3 space-y-2 border-t border-slate-50 pt-3">
                     <div className="flex items-center gap-2 bg-slate-50 rounded-xl px-3 py-2">
-                      <span className="text-xs text-slate-400">📧</span>
+                      <span className="text-xs text-slate-400">@</span>
                       <input className="flex-1 text-xs text-slate-600 bg-transparent focus:outline-none" type="email" value={u.email||""} onChange={e=>persist(list.map(x=>x.id===u.id?{...x,email:e.target.value}:x))} placeholder="Email notifications..."/>
                     </div>
                     <div className="flex items-center justify-between bg-slate-50 rounded-xl px-3 py-2">
-                      <span className="text-xs text-slate-600 font-medium">★ Accès réglages</span>
+                      <span className="text-xs text-slate-600 font-medium">Acces reglages</span>
                       <button onClick={()=>persist(list.map(x=>x.id===u.id?{...x,adminAccess:!x.adminAccess}:x))} className={`w-10 h-5 rounded-full transition relative ${u.adminAccess?"bg-amber-400":"bg-slate-200"}`}>
-                        <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-all ${u.adminAccess?"left-5.5":"left-0.5"}`} style={{left:u.adminAccess?"calc(100% - 18px)":2}}/>
+                        <span className="absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-all" style={{left:u.adminAccess?"calc(100% - 18px)":2}}/>
                       </button>
                     </div>
                     {editPwd===u.id
-                      ?<div className="flex gap-2"><input className={inp+" flex-1 !py-2"} value={newPwd} onChange={e=>setNP(e.target.value)} placeholder="Nouveau mot de passe" type="text"/><button onClick={()=>{if(!newPwd.trim())return;persist(list.map(x=>x.id===u.id?{...x,password:newPwd.trim()}:x));setEP(null);setNP("");}} className="bg-indigo-500 text-white rounded-xl px-3 text-xs font-bold">✓</button><button onClick={()=>{setEP(null);setNP("");}} className="border rounded-xl px-3 text-xs text-slate-500">✕</button></div>
-                      :<div className="flex items-center justify-between bg-slate-50 rounded-xl px-3 py-2"><span className="text-xs text-slate-400 font-mono tracking-widest">{"•".repeat(Math.min(u.password?.length||8,12))}</span><button onClick={()=>{setEP(u.id);setNP("");}} className="text-xs text-indigo-500 font-semibold">Modifier</button></div>
+                      ?<div className="flex gap-2"><input className={inp+" flex-1 !py-2"} value={newPwd} onChange={e=>setNP(e.target.value)} placeholder="Nouveau mot de passe"/><button onClick={()=>{if(!newPwd.trim())return;persist(list.map(x=>x.id===u.id?{...x,password:newPwd.trim()}:x));setEP(null);setNP("");}} className="bg-indigo-500 text-white rounded-xl px-3 text-xs font-bold">✓</button><button onClick={()=>{setEP(null);setNP("");}} className="border rounded-xl px-3 text-xs text-slate-500">✕</button></div>
+                      :<div className="flex items-center justify-between bg-slate-50 rounded-xl px-3 py-2"><span className="text-xs text-slate-500 font-mono">{u.password}</span><button onClick={()=>{setEP(u.id);setNP("");}} className="text-xs text-indigo-500 font-semibold">Modifier</button></div>
                     }
                   </div>
                 </div>
               ))}
               {!adding
-                ?<button onClick={()=>setAdding(true)} className="w-full border-2 border-dashed border-slate-200 rounded-2xl py-4 text-sm text-slate-400 hover:border-indigo-300 hover:text-indigo-400 transition">+ Ajouter un utilisateur</button>
+                ?<button onClick={()=>setAdding(true)} className="w-full border-2 border-dashed border-slate-200 rounded-2xl py-4 text-sm text-slate-400">+ Ajouter un utilisateur</button>
                 :<div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 space-y-3">
                   <p className="font-semibold text-sm text-slate-700">Nouvel utilisateur</p>
                   <input className={inp} value={nu.name} onChange={e=>setNu(v=>({...v,name:e.target.value}))} placeholder="Nom complet *"/>
-                  <input className={inp} value={nu.username} onChange={e=>setNu(v=>({...v,username:e.target.value}))} placeholder="Identifiant *" autoCapitalize="none"/>
+                  <input className={inp} value={nu.username} onChange={e=>setNu(v=>({...v,username:e.target.value}))} placeholder="Identifiant *"/>
                   <input className={inp} value={nu.password} onChange={e=>setNu(v=>({...v,password:e.target.value}))} placeholder="Mot de passe *"/>
-                  <input className={inp} value={nu.email||""} onChange={e=>setNu(v=>({...v,email:e.target.value}))} type="email" placeholder="Email (pour notifications)"/>
-                  <input className={inp} value={nu.initials} onChange={e=>setNu(v=>({...v,initials:e.target.value.toUpperCase().slice(0,2)}))} placeholder="Initiales (ex: TC)" maxLength={2}/>
+                  <input className={inp} value={nu.email||""} onChange={e=>setNu(v=>({...v,email:e.target.value}))} type="email" placeholder="Email"/>
+                  <input className={inp} value={nu.initials} onChange={e=>setNu(v=>({...v,initials:e.target.value.toUpperCase().slice(0,2)}))} placeholder="Initiales" maxLength={2}/>
                   <select className={inp} value={nu.role} onChange={e=>setNu(v=>({...v,role:e.target.value}))}><option value="tech">Technicien</option><option value="manager">Manager</option><option value="admin">Administrateur</option></select>
                   <div className="flex gap-2">
                     <button onClick={()=>setAdding(false)} className="flex-1 border border-slate-200 rounded-xl py-2.5 text-sm text-slate-500 bg-white">Annuler</button>
-                    <button onClick={()=>{if(!nu.username||!nu.password||!nu.name){alert("Champs requis.");return;}if(list.some(u=>u.username===nu.username)){alert("Identifiant déjà utilisé.");return;}const initials=nu.initials||nu.name.split(" ").map(w=>w[0]).join("").toUpperCase().slice(0,2);persist([...list,{...nu,id:uid(),initials}]);setAdding(false);setNu({username:"",password:"",name:"",role:"tech",initials:"",email:""});}} className="flex-1 bg-indigo-600 text-white rounded-xl py-2.5 text-sm font-bold">Créer</button>
+                    <button onClick={()=>{if(!nu.username||!nu.password||!nu.name){alert("Champs requis.");return;}if(list.some(u=>u.username===nu.username)){alert("Identifiant deja utilise.");return;}const initials=nu.initials||nu.name.split(" ").map(w=>w[0]).join("").toUpperCase().slice(0,2);persist([...list,{...nu,id:uid(),initials}]);setAdding(false);setNu({username:"",password:"",name:"",role:"tech",initials:"",email:""});}} className="flex-1 bg-indigo-600 text-white rounded-xl py-2.5 text-sm font-bold">Creer</button>
                   </div>
                 </div>
               }
@@ -832,8 +762,7 @@ function SettingsScreen({currentUser,users,onSave,onLogout,storage}){
 }
 
 // ── VALIDATION ────────────────────────────────────────────────────
-function ValidationModal({storage,users,onApprove,onReject,onClose}){
-  const all=Object.values(storage).flat(),pending=all.filter(m=>m.approved===false);
+function ValidationModal({pending,users,onApprove,onReject,onClose}){
   return(
     <Modal onClose={onClose}>
       <div className="px-4 pb-8">
@@ -841,19 +770,19 @@ function ValidationModal({storage,users,onApprove,onReject,onClose}){
           <h2 className="font-bold text-slate-900 text-lg">Validation</h2>
           <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-full bg-slate-100 text-slate-500 text-sm">✕</button>
         </div>
-        {pending.length===0&&<div className="text-center py-12"><p className="text-4xl mb-3">✅</p><p className="text-slate-500">Tout est validé !</p></div>}
+        {pending.length===0&&<div className="text-center py-12"><p className="text-slate-500">Tout est valide !</p></div>}
         <div className="space-y-3">
           {pending.map(m=>{
             const creator=getUser(users,m.createdBy),assignee=getUser(users,m.assignedTo);
             return(
               <div key={m.id} className={`bg-white rounded-2xl border p-4 shadow-sm ${m.priority==="urgent"?"border-l-4 border-l-red-400 border-slate-100":"border-slate-100"}`}>
                 <div className="flex items-start gap-3 mb-3">
-                  <div className="flex-1"><p className="font-semibold text-slate-800">{m.title}</p>{m.location&&<p className="text-xs text-slate-400">📍 {m.location}</p>}<p className="text-xs text-slate-400">📅 {fmtShort(m.date)} · {creator.name} → {assignee.name}</p></div>
+                  <div className="flex-1"><p className="font-semibold text-slate-800">{m.title}</p>{m.location&&<p className="text-xs text-slate-400">{m.location}</p>}<p className="text-xs text-slate-400">{fmtShort(m.date)} - {creator.name} -> {assignee.name}</p></div>
                   {m.priority==="urgent"&&<PriorityBadge/>}
                 </div>
                 <div className="flex gap-2">
-                  <button onClick={()=>onReject(m)} className="flex-1 border border-slate-200 text-slate-600 rounded-xl py-2.5 text-sm font-semibold hover:bg-slate-50">✕ Refuser</button>
-                  <button onClick={()=>onApprove(m)} className="flex-1 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl py-2.5 text-sm font-semibold">✓ Valider</button>
+                  <button onClick={()=>onReject(m)} className="flex-1 border border-slate-200 text-slate-600 rounded-xl py-2.5 text-sm font-semibold">Refuser</button>
+                  <button onClick={()=>onApprove(m)} className="flex-1 bg-emerald-500 text-white rounded-xl py-2.5 text-sm font-semibold">Valider</button>
                 </div>
               </div>
             );
@@ -878,51 +807,47 @@ function MissionDetailModal({mission:m,users,currentUser,onClose,onEdit,onDelete
 
   return(
     <Modal onClose={onClose}>
-      <div className="px-4 pb-8 space-y-4">
-        {/* Header */}
+      <div className="px-4 pb-8 space-y-4" style={{color:"#1e293b"}}>
         <div className="flex items-start justify-between pt-2">
           <div className="flex-1 mr-3">
             <div className="flex items-center gap-2 mb-1 flex-wrap">
-              {isPending?<span className="text-[11px] font-bold text-violet-600 bg-violet-50 px-2 py-0.5 rounded-full">⏳ Validation</span>:isRejected?<span className="text-[11px] font-bold text-red-500 bg-red-50 px-2 py-0.5 rounded-full">✕ Refusé</span>:<StatusBadge status={m.status}/>}
+              {isPending?<span className="text-[11px] font-bold text-violet-600 bg-violet-50 px-2 py-0.5 rounded-full">En attente</span>:isRejected?<span className="text-[11px] font-bold text-red-500 bg-red-50 px-2 py-0.5 rounded-full">Refuse</span>:<StatusBadge status={m.status}/>}
               {m.priority==="urgent"&&<PriorityBadge/>}
             </div>
             <h2 className="font-bold text-slate-900 text-lg leading-snug">{m.title}</h2>
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            {(currentUser.role==="admin"||canEdit)&&<button onClick={onEdit} className="text-xs font-bold text-indigo-600 bg-indigo-50 px-3 py-1.5 rounded-xl">✏️ Modifier</button>}
+            {(currentUser.role==="admin"||canEdit)&&<button onClick={onEdit} className="text-xs font-bold text-indigo-600 bg-indigo-50 px-3 py-1.5 rounded-xl">Modifier</button>}
             <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-full bg-slate-100 text-slate-500 text-sm">✕</button>
           </div>
         </div>
 
-        {/* Validate admin */}
-        {currentUser.role==="admin"&&isPending&&(
+        {(currentUser.role==="admin"||currentUser.adminAccess)&&isPending&&(
           <div className="bg-violet-50 border border-violet-200 rounded-2xl p-4">
-            <p className="text-sm font-bold text-violet-700 mb-3">⏳ En attente de validation</p>
-            <div className="flex gap-2"><button onClick={onReject} className="flex-1 border border-red-200 text-red-500 rounded-xl py-2.5 text-sm font-semibold">✕ Refuser</button><button onClick={onApprove} className="flex-1 bg-emerald-500 text-white rounded-xl py-2.5 text-sm font-semibold">✓ Valider</button></div>
+            <p className="text-sm font-bold text-violet-700 mb-3">En attente de validation</p>
+            <div className="flex gap-2"><button onClick={onReject} className="flex-1 border border-red-200 text-red-500 rounded-xl py-2.5 text-sm font-semibold">Refuser</button><button onClick={onApprove} className="flex-1 bg-emerald-500 text-white rounded-xl py-2.5 text-sm font-semibold">Valider</button></div>
           </div>
         )}
 
-        {/* Info */}
         <div className="bg-white rounded-2xl border border-slate-100 shadow-sm divide-y divide-slate-50">
-          {m.location&&<div className="flex items-center gap-3 px-4 py-3"><span className="text-slate-400 text-sm">📍</span><div><p className="text-xs text-slate-400">Lieu</p><p className="text-sm font-semibold text-slate-700">{m.location}</p></div></div>}
-          <div className="flex items-center gap-3 px-4 py-3"><span className="text-slate-400 text-sm">📅</span><div><p className="text-xs text-slate-400">Date</p><p className="text-sm font-semibold text-slate-700">{fmtLong(m.date)}{m.dateEnd&&m.dateEnd!==m.date?` → ${fmtLong(m.dateEnd)}`:""}</p></div></div>
-          {fmtDur(m.duration)&&<div className="flex items-center gap-3 px-4 py-3"><span className="text-slate-400 text-sm">⏱</span><div><p className="text-xs text-slate-400">Durée</p><p className="text-sm font-semibold text-slate-700">{fmtDur(m.duration)}</p></div></div>}
-          <div className="flex items-center gap-3 px-4 py-3"><Avatar user={assignee} size="xs"/><div><p className="text-xs text-slate-400">Assigné à</p><p className="text-sm font-semibold text-slate-700">{assignee.name}</p></div></div>
+          {m.location&&<div className="flex items-center gap-3 px-4 py-3"><div><p className="text-xs text-slate-400">Lieu</p><p className="text-sm font-semibold text-slate-700">{m.location}</p></div></div>}
+          <div className="flex items-center gap-3 px-4 py-3"><div><p className="text-xs text-slate-400">Date</p><p className="text-sm font-semibold text-slate-700">{fmtLong(m.date)}{m.dateEnd&&m.dateEnd!==m.date?` -> ${fmtLong(m.dateEnd)}`:""}</p></div></div>
+          {fmtDur(m.duration)&&<div className="flex items-center gap-3 px-4 py-3"><div><p className="text-xs text-slate-400">Duree</p><p className="text-sm font-semibold text-slate-700">{fmtDur(m.duration)}</p></div></div>}
+          <div className="flex items-center gap-3 px-4 py-3"><Avatar user={assignee} size="xs"/><div><p className="text-xs text-slate-400">Assigne a</p><p className="text-sm font-semibold text-slate-700">{assignee.name}</p></div></div>
           {m.description&&<div className="px-4 py-3"><p className="text-xs text-slate-400 mb-1">Description</p><p className="text-sm text-slate-600 whitespace-pre-wrap">{m.description}</p></div>}
-          <div className="px-4 py-2"><p className="text-[11px] text-slate-300">Créé par {creator.name} · {new Date(m.createdAt).toLocaleDateString("fr-FR")}</p></div>
+          <div className="px-4 py-2"><p className="text-[11px] text-slate-300">Cree par {creator.name} - {new Date(m.createdAt).toLocaleDateString("fr-FR")}</p></div>
         </div>
 
-        {/* Status change */}
         {canChangeStatus&&mIsApproved&&(
           <div className="relative">
             <button onClick={()=>setShowStatus(v=>!v)} className="w-full flex items-center justify-between bg-white border border-slate-200 rounded-2xl px-4 py-3 shadow-sm">
               <div className="flex items-center gap-2"><span className={`w-2.5 h-2.5 rounded-full ${STATUS[m.status]?.dot}`}/><span className="text-sm font-semibold text-slate-700">{STATUS[m.status]?.label}</span></div>
-              <span className="text-slate-400 text-sm">Changer ↓</span>
+              <span className="text-slate-400 text-sm">Changer</span>
             </button>
             {showStatus&&(
               <div className="absolute left-0 right-0 top-14 bg-white rounded-2xl shadow-xl border border-slate-100 overflow-hidden z-10">
                 {Object.entries(STATUS).map(([k,v])=>(
-                  <button key={k} onClick={()=>{onStatusChange(k);setShowStatus(false);}} className={`w-full flex items-center gap-3 px-4 py-3 hover:bg-slate-50 ${m.status===k?"font-bold bg-slate-50":""}`}>
+                  <button key={k} onClick={()=>{onStatusChange(k);setShowStatus(false);}} className={`w-full flex items-center gap-3 px-4 py-3 ${m.status===k?"font-bold bg-slate-50":""}`}>
                     <span className={`w-2 h-2 rounded-full ${v.dot}`}/><span className="text-sm">{v.label}</span>
                   </button>
                 ))}
@@ -931,31 +856,29 @@ function MissionDetailModal({mission:m,users,currentUser,onClose,onEdit,onDelete
           </div>
         )}
 
-        {/* Photos */}
         {mIsApproved&&(
           <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4">
-            <div className="flex items-center justify-between mb-3"><p className="font-semibold text-slate-700 text-sm">Photos {(m.photos||[]).length>0&&<span className="text-slate-400 font-normal">({m.photos.length})</span>}</p><div className="flex gap-1.5"><button onClick={()=>cameraRef2.current.click()} className="text-xs font-bold text-indigo-500 bg-indigo-50 px-2.5 py-1.5 rounded-xl">📷</button><button onClick={()=>fileRef.current.click()} className="text-xs font-bold text-indigo-500 bg-indigo-50 px-2.5 py-1.5 rounded-xl">🖼</button></div></div>
-            <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handlePhotoFile} />
+            <div className="flex items-center justify-between mb-3"><p className="font-semibold text-slate-700 text-sm">Photos {(m.photos||[]).length>0&&<span className="text-slate-400 font-normal">({m.photos.length})</span>}</p><div className="flex gap-1.5"><button onClick={()=>cameraRef2.current.click()} className="text-xs font-bold text-indigo-500 bg-indigo-50 px-2.5 py-1.5 rounded-xl">Camera</button><button onClick={()=>fileRef.current.click()} className="text-xs font-bold text-indigo-500 bg-indigo-50 px-2.5 py-1.5 rounded-xl">Galerie</button></div></div>
+            <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handlePhotoFile}/>
+            <input ref={cameraRef2} type="file" accept="image/*" capture="environment" className="hidden" onChange={handlePhotoFile}/>
             {(m.photos||[]).length===0&&<p className="text-sm text-slate-300 text-center py-3">Aucune photo</p>}
-            <div className="grid grid-cols-3 gap-2">{(m.photos||[]).map(p=><div key={p.id} className="aspect-square rounded-xl overflow-hidden bg-slate-100 flex items-center justify-center">{photos[p.id]?<img src={photos[p.id]} className="w-full h-full object-cover"/>:<span className="text-slate-300 text-xs">⏳</span>}</div>)}</div>
+            <div className="grid grid-cols-3 gap-2">{(m.photos||[]).map(p=><div key={p.id} className="aspect-square rounded-xl overflow-hidden bg-slate-100 flex items-center justify-center">{photos[p.id]?<img src={photos[p.id]} className="w-full h-full object-cover"/>:<span className="text-slate-300 text-xs">...</span>}</div>)}</div>
           </div>
         )}
 
-        {/* Comments */}
         {mIsApproved&&(
           <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4">
             <p className="font-semibold text-slate-700 text-sm mb-3">Commentaires {(m.comments||[]).length>0&&<span className="text-slate-400 font-normal">({m.comments.length})</span>}</p>
             {(m.comments||[]).length===0&&<p className="text-sm text-slate-300 mb-3 text-center">Aucun commentaire</p>}
-            <div className="space-y-3 mb-3">{(m.comments||[]).map(c=><div key={c.id} className="flex gap-2.5"><div className="w-7 h-7 bg-slate-100 rounded-full flex items-center justify-center text-[11px] font-bold text-slate-500 shrink-0">{c.author?.[0]||"?"}</div><div className="flex-1 bg-slate-50 rounded-xl px-3 py-2"><div className="flex items-baseline gap-2"><span className="text-xs font-semibold text-slate-700">{c.author}</span><span className="text-xs text-slate-400">{new Date(c.createdAt).toLocaleString("fr-FR",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"})}</span></div><p className="text-sm text-slate-600 mt-0.5">{c.text}</p></div></div>)}</div>
+            <div className="space-y-3 mb-3">{(m.comments||[]).map(c=><div key={c.id} className="flex gap-2.5"><div className="w-7 h-7 bg-slate-100 rounded-full flex items-center justify-center text-[11px] font-bold text-slate-500 shrink-0">{c.author?.[0]||"?"}</div><div className="flex-1 bg-slate-50 rounded-xl px-3 py-2"><div className="flex items-baseline gap-2"><span className="text-xs font-semibold text-slate-700">{c.author}</span><span className="text-[10px] text-slate-400">{new Date(c.createdAt).toLocaleString("fr-FR",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"})}</span></div><p className="text-sm text-slate-600 mt-0.5">{c.text}</p></div></div>)}</div>
             <div className="flex gap-2"><input value={cmt} onChange={e=>setCmt(e.target.value)} placeholder="Ajouter un commentaire..." className="flex-1 border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-slate-50" onKeyDown={e=>{if(e.key==="Enter"&&cmt.trim()){onComment(cmt.trim());setCmt("");}}}/>
-              <button onClick={()=>{if(cmt.trim()){onComment(cmt.trim());setCmt("");}}} className="bg-indigo-500 hover:bg-indigo-600 text-white w-10 h-10 rounded-xl flex items-center justify-center">→</button></div>
+              <button onClick={()=>{if(cmt.trim()){onComment(cmt.trim());setCmt("");}}} className="bg-indigo-500 text-white w-10 h-10 rounded-xl flex items-center justify-center">→</button></div>
           </div>
         )}
 
-        {/* Delete */}
         {canEdit&&(
           !confirmDel
-            ?<button onClick={()=>setConfirmDel(true)} className="w-full border border-red-200 text-red-400 rounded-2xl py-3 text-sm hover:bg-red-50">🗑 Supprimer</button>
+            ?<button onClick={()=>setConfirmDel(true)} className="w-full border border-red-200 text-red-400 rounded-2xl py-3 text-sm">Supprimer</button>
             :<div className="border border-red-200 bg-red-50 rounded-2xl p-4 text-center space-y-3"><p className="text-sm font-semibold text-red-600">Confirmer ?</p><div className="flex gap-2"><button onClick={()=>setConfirmDel(false)} className="flex-1 border border-slate-200 rounded-xl py-2 text-sm bg-white">Annuler</button><button onClick={onDelete} className="flex-1 bg-red-500 text-white rounded-xl py-2 text-sm font-semibold">Supprimer</button></div></div>
         )}
       </div>
@@ -984,7 +907,7 @@ function MissionFormModal({mission,date,users,currentUser,onSave,onClose}){
     const location=locType==="CUSTOM"?locCustom.trim():locType;
     if(!title){setErr("Le titre est obligatoire.");return;}
     const duration=(parseInt(dH)||0)*60+(parseInt(dM)||0),end=dateEnd>=dateStart?dateEnd:dateStart;
-    let approved;if(editing)approved=mission.approved;else if(currentUser.role==="admin")approved=undefined;else approved=false;
+    let approved;if(editing)approved=mission.approved;else if(currentUser.role==="admin"||currentUser.adminAccess)approved=undefined;else approved=false;
     onSave({id:mission?.id||uid(),date:dateStart,dateEnd:end!==dateStart?end:undefined,title,location,description:desc.trim(),assignedTo:assigned,status,priority,duration,approved,createdBy:mission?.createdBy||currentUser.id,createdAt:mission?.createdAt||new Date().toISOString(),photos:formPhotos,comments:mission?.comments||[]});
   }
   const inp="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white";
@@ -999,68 +922,59 @@ function MissionFormModal({mission,date,users,currentUser,onSave,onClose}){
             <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-full bg-slate-100 text-slate-500 text-sm">✕</button>
           </div>
         </div>
-        {currentUser.role==="manager"&&!editing&&<div className="bg-violet-50 border border-violet-200 rounded-xl px-4 py-3 text-sm text-violet-700 flex items-start gap-2"><span>⏳</span><span>Soumise à validation admin avant transmission.</span></div>}
+        {currentUser.role==="manager"&&!editing&&<div className="bg-violet-50 border border-violet-200 rounded-xl px-4 py-3 text-sm text-violet-700">Soumise a validation admin avant transmission.</div>}
 
-        {/* Priority */}
-        <div><label className={lbl}>Priorité</label><div className="flex gap-2">
-          {[["normal","Normal"],["urgent","⚡ Urgent"]].map(([k,l])=><button key={k} onClick={()=>setPri(k)} className={`flex-1 py-3 rounded-xl text-sm font-bold border-2 transition ${priority===k?(k==="urgent"?"bg-red-500 border-red-500 text-white":"bg-indigo-600 border-indigo-600 text-white"):"bg-white border-slate-200 text-slate-500"}`}>{l}</button>)}
+        <div><label className={lbl}>Priorite</label><div className="flex gap-2">
+          {[["normal","Normal"],["urgent","Urgent"]].map(([k,l])=><button key={k} onClick={()=>setPri(k)} className={`flex-1 py-3 rounded-xl text-sm font-bold border-2 transition ${priority===k?(k==="urgent"?"bg-red-500 border-red-500 text-white":"bg-indigo-600 border-indigo-600 text-white"):"bg-white border-slate-200 text-slate-500"}`}>{l}</button>)}
         </div></div>
 
-        {/* Dates */}
         <div className="grid grid-cols-2 gap-3">
-          <div><label className={lbl}>Date début</label><input type="date" className={inp} value={dateStart} onChange={e=>handleDS(e.target.value)}/></div>
+          <div><label className={lbl}>Date debut</label><input type="date" className={inp} value={dateStart} onChange={e=>handleDS(e.target.value)}/></div>
           <div><label className={lbl}>Date fin</label><input type="date" className={inp} value={dateEnd} min={dateStart} onChange={e=>setDE(e.target.value)}/></div>
         </div>
-        {dateEnd!==dateStart&&<div className="bg-indigo-50 border border-indigo-200 rounded-xl px-3 py-2 text-xs text-indigo-700 font-medium">📅 {Math.round((new Date(dateEnd)-new Date(dateStart))/86400000)+1} jours · {fmtShort(dateStart)} → {fmtShort(dateEnd)}</div>}
+        {dateEnd!==dateStart&&<div className="bg-indigo-50 border border-indigo-200 rounded-xl px-3 py-2 text-xs text-indigo-700 font-medium">{Math.round((new Date(dateEnd)-new Date(dateStart))/86400000)+1} jours - {fmtShort(dateStart)} -> {fmtShort(dateEnd)}</div>}
 
-        {/* Duration quick */}
-        <div><label className={lbl}>Durée</label>
+        <div><label className={lbl}>Duree</label>
           <div className="flex gap-2 mb-2">
-            {[["Demi-journée",4,0],["Journée",8,0]].map(([l,h,mi])=><button key={l} type="button" onClick={()=>{setDH(String(h));setDM(String(mi));}} className={`flex-1 py-2.5 rounded-xl border-2 text-xs font-bold transition ${dH===String(h)&&dM===String(mi)?"border-indigo-500 bg-indigo-50 text-indigo-700":"border-slate-200 bg-white text-slate-500"}`}>{l}</button>)}
+            {[["Demi-journee",4,0],["Journee",8,0]].map(([l,h,mi])=><button key={l} type="button" onClick={()=>{setDH(String(h));setDM(String(mi));}} className={`flex-1 py-2.5 rounded-xl border-2 text-xs font-bold transition ${dH===String(h)&&dM===String(mi)?"border-indigo-500 bg-indigo-50 text-indigo-700":"border-slate-200 bg-white text-slate-500"}`}>{l}</button>)}
           </div>
           <div className="flex items-center gap-2"><input type="number" min="0" max="23" className={inp+" !w-20 text-center"} value={dH} onChange={e=>setDH(e.target.value)} placeholder="0"/><span className="text-sm text-slate-500">h</span><input type="number" min="0" max="59" step="15" className={inp+" !w-20 text-center"} value={dM} onChange={e=>setDM(e.target.value)} placeholder="00"/><span className="text-sm text-slate-500">min</span></div>
         </div>
 
-        {/* Type */}
         <div><label className={lbl}>Type d'intervention *</label>
           <select className={inp} value={titleType} onChange={e=>{setTT(e.target.value);setErr("");}}>
-            {TASK_TYPES.map(t=><option key={t} value={t}>{t==="CUSTOM"?"✏️ Saisie libre...":t}</option>)}
+            {TASK_TYPES.map(t=><option key={t} value={t}>{t==="CUSTOM"?"Saisie libre...":t}</option>)}
           </select>
-          {titleType==="CUSTOM"&&<input className={inp+" mt-2"} value={titleCustom} onChange={e=>{setTC(e.target.value);setErr("");}} placeholder="Décrivez l'intervention..."/>}
+          {titleType==="CUSTOM"&&<input className={inp+" mt-2"} value={titleCustom} onChange={e=>{setTC(e.target.value);setErr("");}} placeholder="Decrivez l'intervention..."/>}
           {err&&<p className="text-red-500 text-xs mt-1">{err}</p>}
         </div>
 
-        {/* Location */}
         <div><label className={lbl}>Lieu</label>
           <select className={inp} value={locType} onChange={e=>setLT(e.target.value)}>
-            {BUILDINGS_LIST.map(b=><option key={b} value={b}>{b==="CUSTOM"?"✏️ Saisie libre...":b}</option>)}
+            {BUILDINGS_LIST.map(b=><option key={b} value={b}>{b==="CUSTOM"?"Saisie libre...":b}</option>)}
           </select>
           {locType==="CUSTOM"&&<input className={inp+" mt-2"} value={locCustom} onChange={e=>setLC(e.target.value)} placeholder="Adresse ou lieu..."/>}
         </div>
 
-        {/* Description */}
-        <div><label className={lbl}>Description</label><textarea className={inp+" min-h-[70px] resize-none"} value={desc} onChange={e=>setDesc(e.target.value)} placeholder="Matériaux, accès, contexte..."/></div>
+        <div><label className={lbl}>Description</label><textarea className={inp+" min-h-[70px] resize-none"} value={desc} onChange={e=>setDesc(e.target.value)} placeholder="Materiaux, acces, contexte..."/></div>
 
-        {/* Assign */}
-        <div><label className={lbl}>Assigner à</label>
+        <div><label className={lbl}>Assigner a</label>
           <select className={inp} value={assigned} onChange={e=>setAss(e.target.value)}>
             {users.map(u=><option key={u.id} value={u.id}>{u.name}{u.role==="admin"?" (Admin)":u.role==="manager"?" (Manager)":""}</option>)}
           </select>
         </div>
 
-        {/* Status (admin only) */}
-        {currentUser.role==="admin"&&<div><label className={lbl}>Statut</label>
+        {(currentUser.role==="admin"||currentUser.adminAccess)&&<div><label className={lbl}>Statut</label>
           <select className={inp} value={status} onChange={e=>setSt(e.target.value)}>
             {Object.entries(STATUS).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
           </select>
         </div>}
 
-        {/* Photos */}
         <div><label className={lbl}>Photos</label>
-          {formPhotos.length>0&&<div className="grid grid-cols-3 gap-2 mb-2">{formPhotos.map(p=><div key={p.id} className="aspect-square rounded-xl overflow-hidden bg-slate-100 relative">{photoPreview[p.id]?<img src={photoPreview[p.id]} className="w-full h-full object-cover"/>:<div className="w-full h-full flex items-center justify-center text-slate-300 text-xs">📷</div>}<button type="button" onClick={()=>setFormPhotos(prev=>prev.filter(x=>x.id!==p.id))} className="absolute top-1 right-1 w-5 h-5 bg-red-500 text-white rounded-full text-[10px] flex items-center justify-center">✕</button></div>)}</div>}
+          {formPhotos.length>0&&<div className="grid grid-cols-3 gap-2 mb-2">{formPhotos.map(p=><div key={p.id} className="aspect-square rounded-xl overflow-hidden bg-slate-100 relative">{photoPreview[p.id]?<img src={photoPreview[p.id]} className="w-full h-full object-cover"/>:<div className="w-full h-full flex items-center justify-center text-slate-300 text-xs">...</div>}<button type="button" onClick={()=>setFormPhotos(prev=>prev.filter(x=>x.id!==p.id))} className="absolute top-1 right-1 w-5 h-5 bg-red-500 text-white rounded-full text-[10px] flex items-center justify-center">✕</button></div>)}</div>}
           <div className="flex gap-2">
-            <button type="button" onClick={()=>cameraRef.current.click()} className="flex-1 border-2 border-dashed border-slate-200 rounded-xl py-3 text-xs text-slate-400 hover:border-indigo-300 hover:text-indigo-400 transition">📷 Caméra</button>
-            <button type="button" onClick={()=>photoRef.current.click()} className="flex-1 border-2 border-dashed border-slate-200 rounded-xl py-3 text-xs text-slate-400 hover:border-indigo-300 hover:text-indigo-400 transition">🖼 Galerie</button>
+            <button type="button" onClick={()=>cameraRef.current.click()} className="flex-1 border-2 border-dashed border-slate-200 rounded-xl py-3 text-xs text-slate-400">Camera</button>
+            <button type="button" onClick={()=>photoRef.current.click()} className="flex-1 border-2 border-dashed border-slate-200 rounded-xl py-3 text-xs text-slate-400">Galerie</button>
           </div>
           <input ref={cameraRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={handlePhotoAdd}/>
           <input ref={photoRef} type="file" accept="image/*" className="hidden" onChange={handlePhotoAdd}/>
@@ -1068,6 +982,21 @@ function MissionFormModal({mission,date,users,currentUser,onSave,onClose}){
       </div>
     </Modal>
   );
+}
+
+// ── ERROR BOUNDARY ───────────────────────────────────────────────────
+class ErrorBoundary extends React.Component{
+  constructor(p){super(p);this.state={error:null};}
+  static getDerivedStateFromError(e){return{error:e};}
+  render(){
+    if(this.state.error){
+      return <div style={{padding:20,color:"#dc2626",fontFamily:"monospace",background:"white",minHeight:"100vh"}}>
+        <h2>Erreur dans l'application :</h2>
+        <pre style={{background:"#fee2e2",padding:16,borderRadius:8,whiteSpace:"pre-wrap",fontSize:12}}>{this.state.error.message}{"\n\n"}{this.state.error.stack}</pre>
+      </div>;
+    }
+    return this.props.children;
+  }
 }
 
 // ── ROOT APP ──────────────────────────────────────────────────────
@@ -1078,8 +1007,20 @@ function App(){
   const [cal,setCal]=useState(()=>{const d=new Date();return{y:d.getFullYear(),m:d.getMonth()};});
   const [selM,setSelM]=useState(null),[showNewMission,setShowNew]=useState(false),[newMissionDate,setNewMissionDate]=useState(today());
   const [showValidation,setShowValidation]=useState(false),[editM,setEditM]=useState(null);
+  const [globalPending,setGlobalPending]=useState([]);
 
   const monthStr=`${cal.y}-${padM(cal.m)}`;
+
+  // Charge TOUTES les missions en attente, peu importe le mois affiche a l'ecran
+  async function refreshGlobalPending(){
+    const now=new Date(),promises=[];
+    for(let i=-2;i<=6;i++){const d=shiftMonth(now.getFullYear(),now.getMonth(),i);promises.push(st.get(mkKey(d.y,d.m)));}
+    const results=await Promise.all(promises);
+    const flat=results.filter(Boolean).flatMap(r=>Object.values(normMissions(r)).flat());
+    const seen=new Set();
+    const pending=flat.filter(m=>{if(m.approved!==false)return false;if(seen.has(m.id))return false;seen.add(m.id);return true;});
+    setGlobalPending(pending);
+  }
 
   async function loadMonthStorage(y,m){
     const key=mkKey(y,m),prev=shiftMonth(y,m,-1),pk=mkKey(prev.y,prev.m);
@@ -1092,15 +1033,15 @@ function App(){
   useEffect(()=>{(async()=>{
     let u=await st.get(SK_USERS);
     if(!u?.length){u=DEFAULT_USERS;await st.set(SK_USERS,u);}
-    else{let changed=false;u=u.map(su=>{const def=DEFAULT_USERS.find(d=>d.id===su.id||d.username===su.username);if(def&&def.adminAccess&&!su.adminAccess){changed=true;return{...su,adminAccess:true};}return su;});if(changed)await st.set(SK_USERS,u);}
     try{const saved=localStorage.getItem("lv_session");if(saved){const su=JSON.parse(saved);if(u.find(x=>x.id===su.id&&x.password===su.password))setUser(su);}}catch{}
     const s=await loadMonthStorage(cal.y,cal.m);setUsers(u);setStorage(s);setBoot(false);
+    refreshGlobalPending();
   })();},[]);
 
   useEffect(()=>{
     if(!window.__CONFIGURED||booting)return;
     const key=mkKey(cal.y,cal.m);
-    const unsub=window.__db.collection("app_data").doc(key).onSnapshot(async()=>{const s=await loadMonthStorage(cal.y,cal.m);setStorage(s);},e=>console.error(e));
+    const unsub=window.__db.collection("app_data").doc(key).onSnapshot(async()=>{const s=await loadMonthStorage(cal.y,cal.m);setStorage(s);refreshGlobalPending();},e=>console.error(e));
     return()=>unsub();
   },[cal.y,cal.m,booting]);
 
@@ -1110,6 +1051,28 @@ function App(){
     const toSave={};Object.entries(ns).forEach(([d,ms])=>{const own=ms.filter(x=>x.date.startsWith(monthStr));if(own.length)toSave[d]=own;});
     await st.set(mkKey(cal.y,cal.m),toSave);setStorage(ns);
   }
+  // Met a jour une mission peu importe son mois (utilise pour validation globale)
+  async function patchMissionAny(updated,missionDate){
+    const targetMonth=missionDate.slice(0,7);
+    const [ty,tm]=targetMonth.split("-").map(Number);
+    const key=mkKey(ty,tm-1);
+    const raw=normMissions(await st.get(key));
+    const d=updated.date;
+    if(missionDate!==d){
+      raw[missionDate]=(raw[missionDate]||[]).filter(x=>x.id!==updated.id);
+      if(!raw[missionDate]||!raw[missionDate].length)delete raw[missionDate];
+    }
+    if(!raw[d])raw[d]=[];
+    const found=raw[d].some(x=>x.id===updated.id);
+    raw[d]=found?raw[d].map(x=>x.id===updated.id?updated:x):[...raw[d],updated];
+    await st.set(key,raw);
+    // Si ca concerne le mois actuellement affiche, rafraichir aussi storage local
+    if(targetMonth===monthStr||d.slice(0,7)===monthStr){
+      const s=await loadMonthStorage(cal.y,cal.m);setStorage(s);
+    }
+    if(selM?.id===updated.id)setSelM(updated);
+  }
+
   async function patchMission(updated,oldDate){
     const prev=shiftMonth(cal.y,cal.m,-1),prevStr=`${prev.y}-${padM(prev.m)}`,ns={...storage},d=updated.date;
     if(oldDate&&oldDate!==d){ns[oldDate]=(ns[oldDate]||[]).filter(x=>x.id!==updated.id);if(!ns[oldDate]||!ns[oldDate].length)delete ns[oldDate];ns[d]=[...(ns[d]||[]).filter(x=>x.id!==updated.id),updated];}
@@ -1121,12 +1084,13 @@ function App(){
   async function addMission(m){
     const ns={...storage,[m.date]:[...(storage[m.date]||[]),m]};await persistCurrent(ns);
     const fu=await st.get(SK_USERS)||users;
-    if(m.approved===false){
-      // Mikhael vient de soumettre — notifier Laetitia
-      sendMissionEmail(m,fu,"pending").catch(()=>{});
-    } else if(isApproved(m)){
+    if(isApproved(m)){
       sendMissionEmail(m,fu,"created").catch(()=>{});
+    }else{
+      // BUG FIX: notifier les admins quand une mission attend leur validation
+      sendValidationRequestEmail(m,fu).catch(()=>{});
     }
+    refreshGlobalPending();
   }
   async function deleteMission(m){
     const prev=shiftMonth(cal.y,cal.m,-1),prevStr=`${prev.y}-${padM(prev.m)}`,ns={...storage};
@@ -1136,12 +1100,12 @@ function App(){
     setStorage(ns);setSelM(null);
   }
 
-  const pendingCount=Object.values(storage).flat().filter(m=>m.approved===false).length;
+  const pendingCount=globalPending.length;
   const canAdmin=user?.role==="admin"||user?.adminAccess;
 
   function logout(){localStorage.removeItem("lv_session");setUser(null);}
 
-  if(booting)return <div className="flex flex-col items-center justify-center h-screen bg-indigo-900 gap-4"><div className="w-16 h-16 bg-white/10 rounded-3xl flex items-center justify-center text-3xl animate-pulse">🔧</div><p className="text-indigo-300 text-sm">Chargement...</p></div>;
+  if(booting)return <div className="flex flex-col items-center justify-center h-screen bg-indigo-900 gap-4"><div className="w-16 h-16 bg-white/10 rounded-3xl flex items-center justify-center text-3xl">🔧</div><p className="text-indigo-300 text-sm">Chargement...</p></div>;
   if(!user)return <LoginScreen users={users} onLogin={setUser}/>;
 
   function handleMissionClick(m){setSelM(m);}
@@ -1151,32 +1115,29 @@ function App(){
 
   return(
     <div className="relative">
-      {/* Main content */}
-      {tab==="home"&&<HomeScreen storage={storage} users={users} currentUser={user} onMissionClick={handleMissionClick} onNewMission={()=>handleNewMission()} calDate={selDate} setCalDate={setSelDate} setTab={setTab} pendingCount={pendingCount} onValidation={()=>setShowValidation(true)}/>}
+      {tab==="home"&&<HomeScreen storage={storage} users={users} currentUser={user} onMissionClick={handleMissionClick} onNewMission={()=>handleNewMission()} setTab={setTab} pendingCount={pendingCount} pendingMissions={globalPending} onValidation={()=>setShowValidation(true)}/>}
       {tab==="calendar"&&<CalendarScreen year={cal.y} month={cal.m} storage={storage} currentUser={user} users={users} selectedDate={selDate} onDayClick={d=>setSelDate(d)} onPrev={()=>setCal(p=>shiftMonth(p.y,p.m,-1))} onNext={()=>setCal(p=>shiftMonth(p.y,p.m,1))} onMissionClick={handleMissionClick} onNewMission={date=>handleNewMission(date)} onExport={exportMonth} onValidateAll={()=>setShowValidation(true)}/>}
       {tab==="board"&&<BoardScreen storage={storage} users={users} currentUser={user} onMissionClick={handleMissionClick} onNewMission={()=>handleNewMission()} onStatusChange={async(m,status)=>patchMission({...m,status},m.date)}/>}
       {tab==="history"&&<HistoryScreen currentUser={user} users={users}/>}
-      {tab==="settings"&&<SettingsScreen currentUser={user} users={users} onSave={saveUsers} onLogout={logout} storage={storage}/>}
+      {tab==="settings"&&<SettingsScreen currentUser={user} users={users} onSave={saveUsers} onLogout={logout}/>}
 
-      {/* Bottom nav */}
-      <BottomNav tab={tab} setTab={t=>{if(t==="settings"&&pendingCount>0&&canAdmin)setShowValidation(true);setTab(t);}} pendingCount={pendingCount} canAdmin={canAdmin}/>
+      <BottomNav tab={tab} setTab={t=>{refreshGlobalPending();if(t==="settings"&&pendingCount>0&&canAdmin)setShowValidation(true);setTab(t);}} pendingCount={pendingCount} canAdmin={canAdmin}/>
 
-      {/* Modals */}
       {showValidation&&(
-        <ValidationModal storage={storage} users={users} onClose={()=>setShowValidation(false)}
-          onApprove={async m=>{const upd={...m,approved:true};await patchMission(upd,m.date);st.get(SK_USERS).then(fu=>sendMissionEmail(upd,fu||users,"validated")).catch(()=>{});}}
-          onReject={async m=>{await patchMission({...m,approved:"rejected"},m.date);}}/>
+        <ValidationModal pending={globalPending} users={users} onClose={()=>setShowValidation(false)}
+          onApprove={async m=>{const upd={...m,approved:true};await patchMissionAny(upd,m.date);st.get(SK_USERS).then(fu=>sendMissionEmail(upd,fu||users,"validated")).catch(()=>{});refreshGlobalPending();}}
+          onReject={async m=>{await patchMissionAny({...m,approved:"rejected"},m.date);refreshGlobalPending();}}/>
       )}
       {selM&&(
         <MissionDetailModal mission={selM} users={users} currentUser={user}
           onClose={()=>setSelM(null)}
           onEdit={()=>{setEditM(selM);setSelM(null);}}
           onDelete={()=>{deleteMission(selM);}}
-          onApprove={async()=>{const upd={...selM,approved:true};await patchMission(upd,selM.date);st.get(SK_USERS).then(fu=>sendMissionEmail(upd,fu||users,"validated")).catch(()=>{});}}
-          onReject={async()=>patchMission({...selM,approved:"rejected"},selM.date)}
-          onComment={async txt=>{const c={id:uid(),text:txt,author:user.name,authorId:user.id,createdAt:new Date().toISOString()};await patchMission({...selM,comments:[...(selM.comments||[]),c]},selM.date);}}
-          onStatusChange={async s=>patchMission({...selM,status:s},selM.date)}
-          onAddPhoto={async p=>patchMission({...selM,photos:[...(selM.photos||[]),p]},selM.date)}/>
+          onApprove={async()=>{const upd={...selM,approved:true};await patchMissionAny(upd,selM.date);st.get(SK_USERS).then(fu=>sendMissionEmail(upd,fu||users,"validated")).catch(()=>{});refreshGlobalPending();}}
+          onReject={async()=>{await patchMissionAny({...selM,approved:"rejected"},selM.date);refreshGlobalPending();}}
+          onComment={async txt=>{const c={id:uid(),text:txt,author:user.name,authorId:user.id,createdAt:new Date().toISOString()};await patchMissionAny({...selM,comments:[...(selM.comments||[]),c]},selM.date);}}
+          onStatusChange={async s=>patchMissionAny({...selM,status:s},selM.date)}
+          onAddPhoto={async p=>patchMissionAny({...selM,photos:[...(selM.photos||[]),p]},selM.date)}/>
       )}
       {(showNewMission||editM)&&(
         <MissionFormModal
@@ -1194,7 +1155,7 @@ function App(){
   );
 }
 
-ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+ReactDOM.createRoot(document.getElementById("root")).render(<ErrorBoundary><App/></ErrorBoundary>);
 </script>
 </body>
 </html>

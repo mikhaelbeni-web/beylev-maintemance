@@ -7,9 +7,9 @@ function nextDay(d){const dt=new Date(d+'T12:00:00');dt.setDate(dt.getDate()+1);
 
 function generateICS(missions){
   const now=new Date().toISOString().replace(/[:\-]/g,'').slice(0,15)+'Z';
-  const lines=['BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//Beylev//FR','CALSCALE:GREGORIAN','METHOD:PUBLISH','X-WR-CALNAME:Maintenance Beylev','REFRESH-INTERVAL;VALUE=DURATION:PT1H'];
+  const lines=['BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//Beylev//FR','CALSCALE:GREGORIAN','METHOD:PUBLISH','X-WR-CALNAME:Maintenance Beylev'];
   missions.forEach(m=>{
-    const event=['BEGIN:VEVENT','UID:'+m.id+'@beylev','DTSTAMP:'+now,'DTSTART;VALUE=DATE:'+d2ICS(m.date),'DTEND;VALUE=DATE:'+nextDay(m.dateEnd||m.date),'SUMMARY:'+escICS(m.title+(m.priority==='urgent'?' ⚡':'')+(m.location?' — '+m.location:'')),(m.location?'LOCATION:'+escICS(m.location):null),'DESCRIPTION:'+escICS([m.description,'Statut: '+(m.status||'')].filter(Boolean).join(' | ')),'STATUS:'+(m.status==='done'?'COMPLETED':m.status==='cancelled'?'CANCELLED':'CONFIRMED'),'END:VEVENT'];
+    const event=['BEGIN:VEVENT','UID:'+m.id+'@beylev','DTSTAMP:'+now,'DTSTART;VALUE=DATE:'+d2ICS(m.date),'DTEND;VALUE=DATE:'+nextDay(m.dateEnd||m.date),'SUMMARY:'+escICS(m.title+(m.priority==='urgent'?' - URGENT':'')+(m.location?' - '+m.location:'')),(m.location?'LOCATION:'+escICS(m.location):null),'DESCRIPTION:'+escICS([m.description,'Statut: '+(m.status||'')].filter(Boolean).join(' | ')),'STATUS:'+(m.status==='done'?'COMPLETED':m.status==='cancelled'?'CANCELLED':'CONFIRMED'),'END:VEVENT'];
     event.forEach(l=>{if(l)lines.push(l);});
   });
   lines.push('END:VCALENDAR');

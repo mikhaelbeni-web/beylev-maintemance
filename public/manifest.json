@@ -1,12 +1,9 @@
 {
-  "name": "Maintenance Beylev",
+  "name": "Beylev Maintenance",
   "short_name": "Beylev",
-  "description": "Planning des interventions de maintenance",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#0f172a",
-  "theme_color": "#0f172a",
-  "icons": [
-    { "src": "icon.png", "sizes": "192x192", "type": "image/png" }
-  ]
+  "background_color": "#1e1b4b",
+  "theme_color": "#1e1b4b",
+  "icons": []
 }
