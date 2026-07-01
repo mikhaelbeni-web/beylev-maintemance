@@ -144,7 +144,7 @@ async function sendMissionEmail(mission,users,type="created"){
 async function sendValidationRequestEmail(mission,users){
   const creator=getUser(users,mission.createdBy);
   const dateStr=mission.dateEnd&&mission.dateEnd!==mission.date?`Du ${fmtShort(mission.date)} au ${fmtShort(mission.dateEnd)}`:fmtShort(mission.date);
-  const admins=users.filter(u=>(u.role==="admin"||u.adminAccess)&&u.email&&u.email.includes("@"));
+  const admins=users.filter(u=>u.role==="admin"&&u.email&&u.email.includes("@"));
   const params={
     subject:`A valider : ${mission.title}`,
     message:`${creator.name} a soumis une nouvelle intervention qui attend votre validation.`,
@@ -670,10 +670,49 @@ function HistoryScreen({currentUser,users}){
 }
 
 // ── SETTINGS SCREEN ───────────────────────────────────────────────
+function UserCard({u,currentUser,onSave,onDelete}){
+  const [email,setEmail]=useState(u.email||"");
+  const [password,setPassword]=useState(u.password||"");
+  const [adminAccess,setAdminAccess]=useState(!!u.adminAccess);
+  const [dirty,setDirty]=useState(false);
+  const [saved,setSaved]=useState(false);
+  function mark(fn){fn();setDirty(true);setSaved(false);}
+  function save(){onSave({...u,email,password,adminAccess});setDirty(false);setSaved(true);setTimeout(()=>setSaved(false),2000);}
+  return(
+    <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+      <div className="flex items-center gap-3 p-4">
+        <Avatar user={u} size="md"/>
+        <div className="flex-1 min-w-0">
+          <p className="font-semibold text-sm text-slate-800">{u.name}{adminAccess&&<span className="ml-1.5 text-amber-500 text-xs">*</span>}</p>
+          <p className="text-xs text-slate-400">@{u.username} - {u.role==="admin"?"Admin":u.role==="manager"?"Manager":"Tech."}</p>
+        </div>
+        {u.id!==currentUser.id&&<button onClick={onDelete} className="w-7 h-7 flex items-center justify-center rounded-full bg-red-50 text-red-400 text-sm">✕</button>}
+      </div>
+      <div className="px-4 pb-4 space-y-3 border-t border-slate-50 pt-3">
+        <div>
+          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Email</p>
+          <input className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white" type="email" value={email} onChange={e=>mark(()=>setEmail(e.target.value))} placeholder="Email notifications..."/>
+        </div>
+        <div>
+          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Mot de passe</p>
+          <input className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white" type="text" value={password} onChange={e=>mark(()=>setPassword(e.target.value))} placeholder="Mot de passe"/>
+        </div>
+        <div className="flex items-center justify-between bg-slate-50 rounded-xl px-3 py-2.5">
+          <span className="text-xs text-slate-600 font-medium">Acces reglages</span>
+          <button onClick={()=>mark(()=>setAdminAccess(v=>!v))} className={`w-10 h-5 rounded-full transition relative ${adminAccess?"bg-amber-400":"bg-slate-200"}`}>
+            <span className="absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-all" style={{left:adminAccess?"calc(100% - 18px)":2}}/>
+          </button>
+        </div>
+        {dirty&&<button onClick={save} className="w-full bg-indigo-600 text-white font-bold py-2.5 rounded-xl text-sm">Enregistrer</button>}
+        {saved&&<p className="text-center text-xs text-emerald-600 font-semibold">✓ Enregistre</p>}
+      </div>
+    </div>
+  );
+}
+
 function SettingsScreen({currentUser,users,onSave,onLogout}){
   const [list,setList]=useState(users.map(u=>({...u})));
   const [adding,setAdding]=useState(false),[nu,setNu]=useState({username:"",password:"",name:"",role:"tech",initials:"",email:""});
-  const [editPwd,setEP]=useState(null),[newPwd,setNP]=useState("");
   const canAdmin=currentUser.role==="admin"||currentUser.adminAccess;
   const persist=u=>{setList(u);onSave(u);};
   const inp="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white";
@@ -710,32 +749,10 @@ function SettingsScreen({currentUser,users,onSave,onLogout}){
             <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">Utilisateurs</p>
             <div className="space-y-3">
               {list.map(u=>(
-                <div key={u.id} className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-                  <div className="flex items-center gap-3 p-4">
-                    <Avatar user={u} size="md"/>
-                    <div className="flex-1 min-w-0">
-                      <p className="font-semibold text-sm text-slate-800">{u.name}{u.adminAccess&&<span className="ml-1.5 text-amber-500 text-xs">*</span>}</p>
-                      <p className="text-xs text-slate-400">@{u.username} - {u.role==="admin"?"Admin":u.role==="manager"?"Manager":"Tech."}</p>
-                    </div>
-                    {u.id!==currentUser.id&&<button onClick={()=>{if(window.confirm("Supprimer ?"))persist(list.filter(x=>x.id!==u.id));}} className="w-7 h-7 flex items-center justify-center rounded-full bg-red-50 text-red-400 text-sm">✕</button>}
-                  </div>
-                  <div className="px-4 pb-3 space-y-2 border-t border-slate-50 pt-3">
-                    <div className="flex items-center gap-2 bg-slate-50 rounded-xl px-3 py-2">
-                      <span className="text-xs text-slate-400">@</span>
-                      <input className="flex-1 text-xs text-slate-600 bg-transparent focus:outline-none" type="email" value={u.email||""} onChange={e=>persist(list.map(x=>x.id===u.id?{...x,email:e.target.value}:x))} placeholder="Email notifications..."/>
-                    </div>
-                    <div className="flex items-center justify-between bg-slate-50 rounded-xl px-3 py-2">
-                      <span className="text-xs text-slate-600 font-medium">Acces reglages</span>
-                      <button onClick={()=>persist(list.map(x=>x.id===u.id?{...x,adminAccess:!x.adminAccess}:x))} className={`w-10 h-5 rounded-full transition relative ${u.adminAccess?"bg-amber-400":"bg-slate-200"}`}>
-                        <span className="absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-all" style={{left:u.adminAccess?"calc(100% - 18px)":2}}/>
-                      </button>
-                    </div>
-                    {editPwd===u.id
-                      ?<div className="flex gap-2"><input className={inp+" flex-1 !py-2"} value={newPwd} onChange={e=>setNP(e.target.value)} placeholder="Nouveau mot de passe"/><button onClick={()=>{if(!newPwd.trim())return;persist(list.map(x=>x.id===u.id?{...x,password:newPwd.trim()}:x));setEP(null);setNP("");}} className="bg-indigo-500 text-white rounded-xl px-3 text-xs font-bold">✓</button><button onClick={()=>{setEP(null);setNP("");}} className="border rounded-xl px-3 text-xs text-slate-500">✕</button></div>
-                      :<div className="flex items-center justify-between bg-slate-50 rounded-xl px-3 py-2"><span className="text-xs text-slate-500 font-mono">{u.password}</span><button onClick={()=>{setEP(u.id);setNP("");}} className="text-xs text-indigo-500 font-semibold">Modifier</button></div>
-                    }
-                  </div>
-                </div>
+                <UserCard key={u.id} u={u} currentUser={currentUser}
+                  onSave={updated=>persist(list.map(x=>x.id===updated.id?updated:x))}
+                  onDelete={()=>{if(window.confirm("Supprimer ?"))persist(list.filter(x=>x.id!==u.id));}}
+                />
               ))}
               {!adding
                 ?<button onClick={()=>setAdding(true)} className="w-full border-2 border-dashed border-slate-200 rounded-2xl py-4 text-sm text-slate-400">+ Ajouter un utilisateur</button>
