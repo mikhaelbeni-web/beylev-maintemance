@@ -1,4 +1,10 @@
 {
   "outputDirectory": "public",
-  "buildCommand": null
+  "buildCommand": null,
+  "crons": [
+    {
+      "path": "/api/healthcheck",
+      "schedule": "0 6 * * *"
+    }
+  ]
 }

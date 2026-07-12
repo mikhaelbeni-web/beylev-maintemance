@@ -687,14 +687,75 @@ function HistoryScreen({currentUser,users}){
 }
 
 // ── SETTINGS SCREEN ───────────────────────────────────────────────
-function UserCard({u,currentUser,onSave,onDelete}){
+function TrashSection({currentUser,onRestore}){
+  const [trash,setTrash]=useState([]);
+  const [expanded,setExpanded]=useState(false);
+  useEffect(()=>{(async()=>{
+    const t=await st.get("users_trash")||[];
+    // Nettoie automatiquement les items > 30 jours
+    const cutoff=Date.now()-30*24*3600*1000;
+    const valid=t.filter(x=>new Date(x.deletedAt).getTime()>cutoff);
+    if(valid.length!==t.length)await st.set("users_trash",valid);
+    setTrash(valid);
+  })();},[]);
+  async function restore(u){
+    const {deletedAt,deletedBy,...clean}=u;
+    onRestore(clean);
+    const newTrash=trash.filter(x=>x.id!==u.id||x.deletedAt!==u.deletedAt);
+    await st.set("users_trash",newTrash);
+    setTrash(newTrash);
+  }
+  async function purge(u){
+    if(!window.confirm("Supprimer definitivement "+u.name+" ? Cette action est irreversible."))return;
+    const newTrash=trash.filter(x=>x.id!==u.id||x.deletedAt!==u.deletedAt);
+    await st.set("users_trash",newTrash);
+    setTrash(newTrash);
+  }
+  if(trash.length===0)return null;
+  return(
+    <div className="bg-amber-50 border border-amber-200 rounded-2xl overflow-hidden">
+      <button onClick={()=>setExpanded(v=>!v)} className="w-full flex items-center justify-between p-4">
+        <div className="text-left">
+          <p className="text-sm font-bold text-amber-700">🗑 Corbeille utilisateurs ({trash.length})</p>
+          <p className="text-xs text-amber-600 mt-0.5">Conservés 30 jours - restaurables</p>
+        </div>
+        <span className="text-amber-600 text-lg">{expanded?"−":"+"}</span>
+      </button>
+      {expanded&&(
+        <div className="px-4 pb-4 space-y-2 border-t border-amber-200 pt-3">
+          {trash.map(u=>{
+            const days=Math.floor((Date.now()-new Date(u.deletedAt).getTime())/(24*3600*1000));
+            const remaining=30-days;
+            return(
+              <div key={u.id+u.deletedAt} className="bg-white rounded-xl p-3 flex items-center gap-3">
+                <Avatar user={u} size="sm"/>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-slate-800">{u.name}</p>
+                  <p className="text-[10px] text-slate-400">Supprimé par {u.deletedBy} il y a {days}j - reste {remaining}j</p>
+                </div>
+                <button onClick={()=>restore(u)} className="text-xs font-bold text-emerald-600 bg-emerald-50 px-3 py-1.5 rounded-lg">Restaurer</button>
+                <button onClick={()=>purge(u)} className="text-xs font-bold text-red-500 bg-red-50 px-2 py-1.5 rounded-lg">✕</button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function UserCard({u,currentUser,onSave,onDelete,isLastAdmin}){
   const [email,setEmail]=useState(u.email||"");
   const [password,setPassword]=useState(u.password||"");
   const [adminAccess,setAdminAccess]=useState(!!u.adminAccess);
   const [dirty,setDirty]=useState(false);
   const [saved,setSaved]=useState(false);
+  const [confirmDel,setConfirmDel]=useState(false);
+  const [confirmText,setConfirmText]=useState("");
   function mark(fn){fn();setDirty(true);setSaved(false);}
   function save(){onSave({...u,email,password,adminAccess});setDirty(false);setSaved(true);setTimeout(()=>setSaved(false),2000);}
+  const canDelete=u.id!==currentUser.id&&!isLastAdmin;
+  const canConfirmDelete=confirmText.trim().toLowerCase()===u.username.toLowerCase();
   return(
     <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
       <div className="flex items-center gap-3 p-4">
@@ -703,7 +764,8 @@ function UserCard({u,currentUser,onSave,onDelete}){
           <p className="font-semibold text-sm text-slate-800">{u.name}{adminAccess&&<span className="ml-1.5 text-amber-500 text-xs">*</span>}</p>
           <p className="text-xs text-slate-400">@{u.username} - {u.role==="admin"?"Admin":u.role==="manager"?"Manager":"Tech."}</p>
         </div>
-        {u.id!==currentUser.id&&<button onClick={onDelete} className="w-7 h-7 flex items-center justify-center rounded-full bg-red-50 text-red-400 text-sm">✕</button>}
+        {canDelete&&!confirmDel&&<button onClick={()=>setConfirmDel(true)} className="w-7 h-7 flex items-center justify-center rounded-full bg-red-50 text-red-400 text-sm">✕</button>}
+        {isLastAdmin&&<span className="text-[10px] font-bold text-amber-600 bg-amber-50 px-2 py-1 rounded-lg">Protégé</span>}
       </div>
       <div className="px-4 pb-4 space-y-3 border-t border-slate-50 pt-3">
         <div>
@@ -722,6 +784,17 @@ function UserCard({u,currentUser,onSave,onDelete}){
         </div>
         {dirty&&<button onClick={save} className="w-full bg-indigo-600 text-white font-bold py-2.5 rounded-xl text-sm">Enregistrer</button>}
         {saved&&<p className="text-center text-xs text-emerald-600 font-semibold">✓ Enregistre</p>}
+        {confirmDel&&(
+          <div className="border-2 border-red-300 bg-red-50 rounded-xl p-4 space-y-3">
+            <p className="text-sm font-bold text-red-700">⚠ Confirmer la suppression</p>
+            <p className="text-xs text-red-600">Cette action déplace <strong>{u.name}</strong> dans la corbeille pour 30 jours. Pour confirmer, tape <strong>{u.username}</strong> ci-dessous :</p>
+            <input value={confirmText} onChange={e=>setConfirmText(e.target.value)} placeholder={u.username} className="w-full border border-red-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-red-400 bg-white" autoFocus/>
+            <div className="flex gap-2">
+              <button onClick={()=>{setConfirmDel(false);setConfirmText("");}} className="flex-1 border border-slate-300 bg-white rounded-xl py-2.5 text-sm font-semibold">Annuler</button>
+              <button onClick={()=>{if(canConfirmDelete){onDelete();setConfirmDel(false);setConfirmText("");}}} disabled={!canConfirmDelete} className={`flex-1 rounded-xl py-2.5 text-sm font-semibold ${canConfirmDelete?"bg-red-500 text-white":"bg-slate-200 text-slate-400 cursor-not-allowed"}`}>Supprimer</button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -761,16 +834,33 @@ function SettingsScreen({currentUser,users,onSave,onLogout}){
           </div>
         )}
 
+        {canAdmin&&<TrashSection currentUser={currentUser} onRestore={u=>persist([...list,u])}/>}
+
         {canAdmin&&(
           <div>
             <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">Utilisateurs</p>
             <div className="space-y-3">
-              {list.map(u=>(
-                <UserCard key={u.id} u={u} currentUser={currentUser}
-                  onSave={updated=>persist(list.map(x=>x.id===updated.id?updated:x))}
-                  onDelete={()=>{if(window.confirm("Supprimer ?"))persist(list.filter(x=>x.id!==u.id));}}
-                />
-              ))}
+              {list.map(u=>{
+                const adminCount=list.filter(x=>x.role==="admin").length;
+                const isLastAdmin=u.role==="admin"&&adminCount<=1;
+                return(
+                  <UserCard key={u.id} u={u} currentUser={currentUser} isLastAdmin={isLastAdmin}
+                    onSave={updated=>persist(list.map(x=>x.id===updated.id?updated:x))}
+                    onDelete={async()=>{
+                      // Corbeille : on garde le user pendant 30 jours dans app_data/users_trash
+                      try{
+                        const trash=await st.get("users_trash")||[];
+                        trash.push({...u,deletedAt:new Date().toISOString(),deletedBy:currentUser.name});
+                        // Nettoie les vieux items >30 jours
+                        const cutoff=Date.now()-30*24*3600*1000;
+                        const filtered=trash.filter(t=>new Date(t.deletedAt).getTime()>cutoff);
+                        await st.set("users_trash",filtered);
+                      }catch(e){console.error(e);}
+                      persist(list.filter(x=>x.id!==u.id));
+                    }}
+                  />
+                );
+              })}
               {!adding
                 ?<button onClick={()=>setAdding(true)} className="w-full border-2 border-dashed border-slate-200 rounded-2xl py-4 text-sm text-slate-400">+ Ajouter un utilisateur</button>
                 :<div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 space-y-3">
