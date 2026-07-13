@@ -1,7 +1,7 @@
 // Import de taches Hostaway - proxy securise
 // La cle API reste ici, jamais exposee au frontend
-const HOSTAWAY_ACCOUNT_ID = "148614";
-const HOSTAWAY_API_KEY = "88301144c67ad5eb23684c475a30607171e7268df9243fe88d5c3857035770be";
+const HOSTAWAY_ACCOUNT_ID = "96311";
+const HOSTAWAY_API_KEY = "038ea2e96cb0da25459f265ed2bf4b4346e1c3852fcd6976c99cf120010154f7";
 
 let cachedToken = null;
 let tokenExpiry = 0;
@@ -72,23 +72,28 @@ module.exports = async (req, res) => {
 
     // 3. Reservations des 120 prochains jours -> pour calculer la 1ere dispo
     //    Recuperees UNE FOIS pour tout le compte, puis regroupees par leur
-    //    propre listingMapId (le filtre par listing renvoyait les memes
-    //    donnees pour tous les listings - bug detecte et corrige ici)
+    //    propre listingMapId. Si Hostaway refuse (permissions), on degrade
+    //    proprement : les taches s'afficheront quand meme, juste sans date suggeree.
     const today = new Date().toISOString().slice(0, 10);
     const future = new Date(Date.now() + 120 * 24 * 3600 * 1000).toISOString().slice(0, 10);
-    const allReservations = await fetchAllReservations(token, today, future);
     const reservationsByListing = {};
-    allReservations
-      .filter((r) => r.status !== "cancelled")
-      .forEach((r) => {
-        const lid = r.listingMapId;
-        if (!lid) return;
-        const start = (r.arrivalDate || "").slice(0, 10);
-        const end = (r.departureDate || "").slice(0, 10);
-        if (!start || !end) return;
-        if (!reservationsByListing[lid]) reservationsByListing[lid] = [];
-        reservationsByListing[lid].push({ start, end });
-      });
+    let reservationsError = null;
+    try {
+      const allReservations = await fetchAllReservations(token, today, future);
+      allReservations
+        .filter((r) => r.status !== "cancelled")
+        .forEach((r) => {
+          const lid = r.listingMapId;
+          if (!lid) return;
+          const start = (r.arrivalDate || "").slice(0, 10);
+          const end = (r.departureDate || "").slice(0, 10);
+          if (!start || !end) return;
+          if (!reservationsByListing[lid]) reservationsByListing[lid] = [];
+          reservationsByListing[lid].push({ start, end });
+        });
+    } catch (e) {
+      reservationsError = e.message;
+    }
 
     // 4. Mise en forme - on garde TOUT, sans filtrer par statut
     const tasks = rawTasks.map((t) => ({
@@ -105,6 +110,7 @@ module.exports = async (req, res) => {
     }));
 
     const payload = { tasks, reservations: reservationsByListing, count: tasks.length };
+    if (reservationsError) payload.reservationsError = reservationsError;
     if (debug) payload.raw = { rawTasks, listings };
     res.status(200).json(payload);
   } catch (e) {
