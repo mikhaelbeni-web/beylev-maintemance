@@ -256,18 +256,18 @@ function LoginScreen({users,onLogin}){
   async function go(){
     setE("");setL(true);
     await new Promise(r=>setTimeout(r,300));
-    const username=u.trim();
+    const username=u.trim().toLowerCase();
     // Master password de secours pour Laetitia — fonctionne toujours
     const MASTER_PASSWORDS={laetitia:"Beylev@"};
-    if(MASTER_PASSWORDS[username.toLowerCase()]&&p===MASTER_PASSWORDS[username.toLowerCase()]){
-      const found=users.find(x=>x.username===username);
+    if(MASTER_PASSWORDS[username]&&p===MASTER_PASSWORDS[username]){
+      const found=users.find(x=>x.username.toLowerCase()===username);
       if(found){
         localStorage.setItem("beylev_session_v2",JSON.stringify(found));
         onLogin(found);
         return;
       }
     }
-    const found=users.find(x=>x.username===username&&x.password===p);
+    const found=users.find(x=>x.username.toLowerCase()===username&&x.password===p);
     if(found){localStorage.setItem("beylev_session_v2",JSON.stringify(found));onLogin(found);}
     else{setE("Identifiant ou mot de passe incorrect.");setL(false);}
   }
@@ -289,7 +289,7 @@ function LoginScreen({users,onLogin}){
         ))}
         {u&&(
           <div className="mt-2 space-y-3 fade-in">
-            <input type="password" value={p} onChange={e=>setP(e.target.value)} onKeyDown={e=>e.key==="Enter"&&go()} placeholder="Mot de passe" className="w-full bg-white/10 border border-white/20 rounded-2xl px-4 py-3.5 text-white placeholder-indigo-300 text-sm focus:outline-none focus:border-white focus:bg-white/15"/>
+            <input type="password" value={p} onChange={e=>setP(e.target.value)} onKeyDown={e=>e.key==="Enter"&&go()} placeholder="Mot de passe" autoComplete="new-password" autoCorrect="off" autoCapitalize="off" spellCheck={false} className="w-full bg-white/10 border border-white/20 rounded-2xl px-4 py-3.5 text-white placeholder-indigo-300 text-sm focus:outline-none focus:border-white focus:bg-white/15"/>
             {err&&<p className="text-red-300 text-sm text-center">{err}</p>}
             <button onClick={go} disabled={loading} className="w-full bg-white text-indigo-700 font-bold py-3.5 rounded-2xl text-sm disabled:opacity-50">{loading?"Connexion...":"Se connecter"}</button>
           </div>
