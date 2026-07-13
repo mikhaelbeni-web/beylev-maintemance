@@ -33,6 +33,25 @@ async function hostawayGet(path, token) {
   return r.json();
 }
 
+async function fetchAllReservations(token, arrivalStart, arrivalEnd) {
+  // Recupere TOUTES les reservations d'un coup, puis on les trie nous-memes
+  // par listingMapId (le filtre par listing cote Hostaway s'est avere non fiable)
+  let all = [];
+  let offset = 0;
+  const limit = 500;
+  for (let page = 0; page < 10; page++) {
+    const rd = await hostawayGet(
+      `/reservations?arrivalStartDate=${arrivalStart}&arrivalEndDate=${arrivalEnd}&limit=${limit}&offset=${offset}`,
+      token
+    );
+    const results = rd.result || [];
+    all = all.concat(results);
+    if (results.length < limit) break;
+    offset += limit;
+  }
+  return all;
+}
+
 module.exports = async (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   try {
@@ -51,30 +70,25 @@ module.exports = async (req, res) => {
       listings[l.id] = l.name || l.internalListingName || l.address || "Annonce " + l.id;
     });
 
-    // 3. Reservations des 120 prochains jours par unite -> pour calculer la 1ere dispo
+    // 3. Reservations des 120 prochains jours -> pour calculer la 1ere dispo
+    //    Recuperees UNE FOIS pour tout le compte, puis regroupees par leur
+    //    propre listingMapId (le filtre par listing renvoyait les memes
+    //    donnees pour tous les listings - bug detecte et corrige ici)
     const today = new Date().toISOString().slice(0, 10);
     const future = new Date(Date.now() + 120 * 24 * 3600 * 1000).toISOString().slice(0, 10);
-    const listingIds = [...new Set(rawTasks.map((t) => t.listingMapId).filter(Boolean))];
+    const allReservations = await fetchAllReservations(token, today, future);
     const reservationsByListing = {};
-    await Promise.all(
-      listingIds.map(async (lid) => {
-        try {
-          const rd = await hostawayGet(
-            `/reservations?listingMapId=${lid}&arrivalStartDate=${today}&arrivalEndDate=${future}&limit=150`,
-            token
-          );
-          reservationsByListing[lid] = (rd.result || [])
-            .filter((r) => r.status !== "cancelled")
-            .map((r) => ({
-              start: (r.arrivalDate || "").slice(0, 10),
-              end: (r.departureDate || "").slice(0, 10),
-            }))
-            .filter((r) => r.start && r.end);
-        } catch (e) {
-          reservationsByListing[lid] = [];
-        }
-      })
-    );
+    allReservations
+      .filter((r) => r.status !== "cancelled")
+      .forEach((r) => {
+        const lid = r.listingMapId;
+        if (!lid) return;
+        const start = (r.arrivalDate || "").slice(0, 10);
+        const end = (r.departureDate || "").slice(0, 10);
+        if (!start || !end) return;
+        if (!reservationsByListing[lid]) reservationsByListing[lid] = [];
+        reservationsByListing[lid].push({ start, end });
+      });
 
     // 4. Mise en forme - on garde TOUT, sans filtrer par statut
     const tasks = rawTasks.map((t) => ({
