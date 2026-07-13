@@ -155,6 +155,25 @@ async function sendValidationRequestEmail(mission,users){
   await Promise.all(admins.map(u=>sendEmailRaw({...params,to_email:u.email,to_name:u.name})));
 }
 
+// Quand une intervention issue d'un import Hostaway est validee -> email gestion@ + notif sur le tableau de bord de Mikhael
+async function notifyHostawayApproved(mission,users){
+  const dateStr=mission.dateEnd&&mission.dateEnd!==mission.date?`Du ${fmtShort(mission.date)} au ${fmtShort(mission.dateEnd)}`:fmtShort(mission.date);
+  await sendEmailRaw({
+    to_email:"gestion@beylev.com",to_name:"Gestion",
+    subject:`URGENT - Bloquer la date Hostaway : ${mission.title}`,
+    message:`Une intervention importee depuis Hostaway vient d'etre validee. Pensez a bloquer la date sur Hostaway si necessaire.`,
+    mission_title:mission.title,mission_date:dateStr,mission_location:mission.location||"Non precise",
+    mission_description:mission.description||"—",mission_priority:mission.priority==="urgent"?"URGENT":"Normal",
+    assigned_to:getUser(users,mission.assignedTo).name,created_by:getUser(users,mission.createdBy).name,
+    app_url:window.location.href
+  }).catch(()=>{});
+  try{
+    const notifs=await st.get("hostaway_notifications")||[];
+    notifs.unshift({id:uid(),title:mission.title,date:mission.date,location:mission.location||"",createdAt:new Date().toISOString(),read:false});
+    await st.set("hostaway_notifications",notifs.slice(0,30));
+  }catch(e){console.error(e);}
+}
+
 // ── DESIGN SYSTEM ─────────────────────────────────────────────────
 function Avatar({user,size="sm"}){
   const sz=size==="sm"?"w-8 h-8 text-xs":size==="xs"?"w-6 h-6 text-[10px]":"w-10 h-10 text-sm";
@@ -311,6 +330,18 @@ function HomeScreen({storage,users,currentUser,onMissionClick,onNewMission,setTa
   const greeting=hour<12?"Bonjour":hour<18?"Bon apres-midi":"Bonsoir";
   const firstName=currentUser.name.split(" ")[0];
 
+  const [hostawayNotifs,setHostawayNotifs]=useState([]);
+  useEffect(()=>{
+    if(currentUser.role!=="manager")return;
+    (async()=>{const n=await st.get("hostaway_notifications")||[];setHostawayNotifs(n.filter(x=>!x.read));})();
+  },[currentUser.role]);
+  async function dismissNotif(id){
+    const all=await st.get("hostaway_notifications")||[];
+    const updated=all.map(n=>n.id===id?{...n,read:true}:n);
+    await st.set("hostaway_notifications",updated);
+    setHostawayNotifs(updated.filter(x=>!x.read));
+  }
+
   return(
     <div className="min-h-screen bg-slate-50">
       <div className="bg-gradient-to-br from-indigo-900 to-violet-800 px-4 pt-12 pb-8">
@@ -348,6 +379,21 @@ function HomeScreen({storage,users,currentUser,onMissionClick,onNewMission,setTa
                 <MissionCard key={m.id} m={m} users={users} onClick={()=>onMissionClick(m)} compact/>
               ))}
             </div>
+          </div>
+        )}
+
+        {currentUser.role==="manager"&&hostawayNotifs.length>0&&(
+          <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 space-y-2">
+            <p className="text-sm font-bold text-emerald-700">Intervention(s) Hostaway validee(s) - bloquer la date</p>
+            {hostawayNotifs.map(n=>(
+              <div key={n.id} className="bg-white rounded-xl p-3 flex items-center gap-3">
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-slate-800 truncate">{n.title}</p>
+                  <p className="text-xs text-slate-400">{fmtShort(n.date)}{n.location?" - "+n.location:""}</p>
+                </div>
+                <button onClick={()=>dismissNotif(n.id)} className="text-xs font-bold text-emerald-600 bg-emerald-50 px-3 py-1.5 rounded-lg">Vu</button>
+              </div>
+            ))}
           </div>
         )}
 
@@ -1137,6 +1183,8 @@ function findFirstAvailableDate(reservations,busyDates,horizonDays=120){
   const today=new Date();
   for(let i=0;i<horizonDays;i++){
     const d=new Date(today);d.setDate(d.getDate()+i);
+    const dow=d.getDay(); // 0=dimanche, 6=samedi
+    if(dow===0||dow===6)continue; // jamais le week-end
     const ds=d.toISOString().slice(0,10);
     const occupied=(reservations||[]).some(r=>ds>=r.start&&ds<r.end);
     const techBusy=busyDates.has(ds);
@@ -1162,18 +1210,24 @@ function HostawayTaskRow({task,users,techUser,onSubmit,onIgnore}){
   const [busy,setBusy]=useState(false);
   const [done,setDone]=useState(false);
   const inp="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white";
+  // Jour de rotation (checkout) -> acces uniquement entre 11h et 15h
+  const isTurnoverDay=!!(date&&(task.reservations||[]).some(r=>r.end===date));
 
   async function submit(){
     if(!date){alert("Choisis une date avant de soumettre.");return;}
+    const dow=new Date(date+"T12:00:00").getDay();
+    if(dow===0||dow===6){alert("Impossible de planifier une intervention un samedi ou un dimanche. Choisis un autre jour.");return;}
     setBusy(true);
     const loc=location==="CUSTOM"?locCustom.trim():location;
     const duration=(parseInt(dH)||0)*60+(parseInt(dM)||0);
+    const baseDesc=task.description||"";
+    const finalDescription=isTurnoverDay?`ENTRE 11H ET 15H (jour de depart/arrivee client)\n\n${baseDesc}`.trim():baseDesc;
     await onSubmit({
       id:uid(),
       date,dateEnd:date,
       title:title.trim()||"Tache Hostaway",
       location:loc,
-      description:task.description||"",
+      description:finalDescription,
       assignedTo:techUser?.id,
       status:"todo",
       priority:"normal",
@@ -1222,6 +1276,7 @@ function HostawayTaskRow({task,users,techUser,onSubmit,onIgnore}){
           Date proposee {task.suggestedDate?<span className="text-emerald-600 font-normal normal-case">(1ere dispo trouvee)</span>:<span className="text-amber-600 font-normal normal-case">(aucune dispo auto - a choisir)</span>}
         </p>
         <input type="date" className={inp} value={date} onChange={e=>setDate(e.target.value)}/>
+        {isTurnoverDay&&<p className="text-xs font-bold text-amber-600 bg-amber-50 rounded-lg px-3 py-2 mt-2">Jour de depart client - acces ENTRE 11H ET 15H uniquement</p>}
       </div>
 
       <div>
@@ -1265,7 +1320,7 @@ function HostawayImportModal({users,onClose,onSubmitTask}){
           const matchedLocation=matchLocation(bestGuess);
           const reservations=t.listingId?(res.reservations[t.listingId]||[]):[];
           const suggestedDate=t.listingId?findFirstAvailableDate(reservations,busyDates):null;
-          return{...t,matchedLocation,suggestedDate};
+          return{...t,matchedLocation,suggestedDate,reservations};
         });
       setTasks(enriched);
       setLoading(false);
@@ -1463,7 +1518,7 @@ function App(){
 
       {showValidation&&(
         <ValidationModal pending={globalPending} users={users} onClose={()=>setShowValidation(false)}
-          onApprove={async m=>{const upd={...m,approved:true};await patchMissionAny(upd,m.date);st.get(SK_USERS).then(fu=>sendMissionEmail(upd,fu||users,"validated")).catch(()=>{});refreshGlobalPending();}}
+          onApprove={async m=>{const upd={...m,approved:true};await patchMissionAny(upd,m.date);st.get(SK_USERS).then(fu=>{sendMissionEmail(upd,fu||users,"validated");if(upd.hostawayId)notifyHostawayApproved(upd,fu||users);}).catch(()=>{});refreshGlobalPending();}}
           onReject={async m=>{await patchMissionAny({...m,approved:"rejected"},m.date);refreshGlobalPending();}}/>
       )}
       {selM&&(
@@ -1471,7 +1526,7 @@ function App(){
           onClose={()=>setSelM(null)}
           onEdit={()=>{setEditM(selM);setSelM(null);}}
           onDelete={()=>{deleteMission(selM);}}
-          onApprove={async()=>{const upd={...selM,approved:true};await patchMissionAny(upd,selM.date);st.get(SK_USERS).then(fu=>sendMissionEmail(upd,fu||users,"validated")).catch(()=>{});refreshGlobalPending();}}
+          onApprove={async()=>{const upd={...selM,approved:true};await patchMissionAny(upd,selM.date);st.get(SK_USERS).then(fu=>{sendMissionEmail(upd,fu||users,"validated");if(upd.hostawayId)notifyHostawayApproved(upd,fu||users);}).catch(()=>{});refreshGlobalPending();}}
           onReject={async()=>{await patchMissionAny({...selM,approved:"rejected"},selM.date);refreshGlobalPending();}}
           onComment={async txt=>{const c={id:uid(),text:txt,author:user.name,authorId:user.id,createdAt:new Date().toISOString()};await patchMissionAny({...selM,comments:[...(selM.comments||[]),c]},selM.date);}}
           onStatusChange={async s=>patchMissionAny({...selM,status:s},selM.date)}
