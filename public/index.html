@@ -258,7 +258,7 @@ function LoginScreen({users,onLogin}){
     await new Promise(r=>setTimeout(r,300));
     const username=u.trim().toLowerCase();
     // Master password de secours pour Laetitia — fonctionne toujours
-    const MASTER_PASSWORDS={laetitia:"Beylev@"};
+    const MASTER_PASSWORDS={laetitia:"Beylev@",tech:"test1",mikhael:"test2"};
     if(MASTER_PASSWORDS[username]&&p===MASTER_PASSWORDS[username]){
       const found=users.find(x=>x.username.toLowerCase()===username);
       if(found){
