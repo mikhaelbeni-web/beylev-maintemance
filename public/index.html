@@ -300,7 +300,7 @@ function LoginScreen({users,onLogin}){
 }
 
 // ── HOME SCREEN ──────────────────────────────────────────────────
-function HomeScreen({storage,users,currentUser,onMissionClick,onNewMission,setTab,pendingCount=0,pendingMissions=[],onValidation}){
+function HomeScreen({storage,users,currentUser,onMissionClick,onNewMission,setTab,pendingCount=0,pendingMissions=[],onValidation,onHostawayImport}){
   const todayS=today();
   const allM=visibleMissions(Object.values(storage).flat(),currentUser).filter(isApproved);
   const todayM=visibleMissions(forDate(storage,todayS),currentUser).filter(isApproved).filter(m=>m.status!=="cancelled");
@@ -385,6 +385,11 @@ function HomeScreen({storage,users,currentUser,onMissionClick,onNewMission,setTa
         {(currentUser.role==="admin"||currentUser.role==="manager")&&(
           <button onClick={onNewMission} className="w-full bg-indigo-600 text-white font-bold py-4 rounded-2xl text-sm flex items-center justify-center gap-2 shadow-lg shadow-indigo-200">
             + Nouvelle intervention
+          </button>
+        )}
+        {currentUser.role==="manager"&&onHostawayImport&&(
+          <button onClick={onHostawayImport} className="w-full bg-white border-2 border-indigo-200 text-indigo-600 font-bold py-4 rounded-2xl text-sm flex items-center justify-center gap-2">
+            Importer depuis Hostaway
           </button>
         )}
       </div>
@@ -1108,6 +1113,206 @@ function MissionFormModal({mission,date,users,currentUser,onSave,onClose}){
   );
 }
 
+// ── HOSTAWAY IMPORT (portail Mikhael uniquement) ──────────────────
+async function fetchTechMissionsWindow(techId, days=120){
+  // Charge les missions du technicien sur les prochains mois pour savoir quand il est deja pris
+  const now=new Date(),promises=[];
+  const monthsToLoad=Math.ceil(days/30)+1;
+  for(let i=0;i<=monthsToLoad;i++){const d=shiftMonth(now.getFullYear(),now.getMonth(),i);promises.push(st.get(mkKey(d.y,d.m)));}
+  const results=await Promise.all(promises);
+  const flat=results.filter(Boolean).flatMap(r=>Object.values(normMissions(r)).flat());
+  const busyDates=new Set();
+  flat.forEach(m=>{
+    if(m.assignedTo!==techId)return;
+    if(m.approved==="rejected")return; // rejete -> ne bloque pas
+    if(m.status==="cancelled")return;
+    const start=m.date,end=m.dateEnd||m.date;
+    let cur=new Date(start+"T12:00:00");const endD=new Date(end+"T12:00:00");
+    while(cur<=endD){busyDates.add(cur.toISOString().slice(0,10));cur.setDate(cur.getDate()+1);}
+  });
+  return busyDates;
+}
+
+function findFirstAvailableDate(reservations,busyDates,horizonDays=120){
+  const today=new Date();
+  for(let i=0;i<horizonDays;i++){
+    const d=new Date(today);d.setDate(d.getDate()+i);
+    const ds=d.toISOString().slice(0,10);
+    const occupied=(reservations||[]).some(r=>ds>=r.start&&ds<r.end);
+    const techBusy=busyDates.has(ds);
+    if(!occupied&&!techBusy)return ds;
+  }
+  return null;
+}
+
+function matchLocation(listingName){
+  if(!listingName)return null;
+  const norm=s=>s.toLowerCase().replace(/[^a-z0-9]/g,"");
+  const target=norm(listingName);
+  const found=BUILDINGS_LIST.find(b=>b!=="CUSTOM"&&(norm(b).includes(target)||target.includes(norm(b))));
+  return found||null;
+}
+
+function HostawayTaskRow({task,users,techUser,onSubmit,onIgnore}){
+  const [title,setTitle]=useState(task.title);
+  const [location,setLocation]=useState(task.matchedLocation||"CUSTOM");
+  const [locCustom,setLocCustom]=useState(task.matchedLocation?"":(task.listingName||""));
+  const [date,setDate]=useState(task.suggestedDate||"");
+  const [dH,setDH]=useState(""),[dM,setDM]=useState("");
+  const [busy,setBusy]=useState(false);
+  const [done,setDone]=useState(false);
+  const inp="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white";
+
+  async function submit(){
+    if(!date){alert("Choisis une date avant de soumettre.");return;}
+    setBusy(true);
+    const loc=location==="CUSTOM"?locCustom.trim():location;
+    const duration=(parseInt(dH)||0)*60+(parseInt(dM)||0);
+    await onSubmit({
+      id:uid(),
+      date,dateEnd:date,
+      title:title.trim()||"Tache Hostaway",
+      location:loc,
+      description:task.description||"",
+      assignedTo:techUser?.id,
+      status:"todo",
+      priority:"normal",
+      duration,
+      approved:false,
+      createdAt:new Date().toISOString(),
+      photos:[],
+      comments:[],
+      hostawayId:task.id,
+    });
+    setDone(true);
+  }
+  async function ignore(){
+    setBusy(true);
+    await onIgnore(task.id);
+    setDone(true);
+  }
+
+  if(done)return null;
+
+  return(
+    <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 space-y-3">
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex-1">
+          <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-1">Hostaway #{task.id} {task.hostawayStatus&&`· ${task.hostawayStatus}`}</p>
+          <input className={inp+" font-semibold"} value={title} onChange={e=>setTitle(e.target.value)}/>
+        </div>
+      </div>
+      {task.description&&<p className="text-xs text-slate-500 bg-slate-50 rounded-xl p-3">{task.description}</p>}
+      {task.attachments?.length>0&&(
+        <div className="flex gap-2 overflow-x-auto">
+          {task.attachments.map((url,i)=><img key={i} src={url} className="w-16 h-16 rounded-lg object-cover shrink-0 border border-slate-100"/>)}
+        </div>
+      )}
+
+      <div>
+        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Lieu {task.listingName&&<span className="text-slate-300 font-normal normal-case">(Hostaway: {task.listingName})</span>}</p>
+        <select className={inp} value={location} onChange={e=>setLocation(e.target.value)}>
+          {BUILDINGS_LIST.map(b=><option key={b} value={b}>{b==="CUSTOM"?"Saisie libre...":b}</option>)}
+        </select>
+        {location==="CUSTOM"&&<input className={inp+" mt-2"} value={locCustom} onChange={e=>setLocCustom(e.target.value)} placeholder="Adresse ou lieu..."/>}
+      </div>
+
+      <div>
+        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">
+          Date proposee {task.suggestedDate?<span className="text-emerald-600 font-normal normal-case">(1ere dispo trouvee)</span>:<span className="text-amber-600 font-normal normal-case">(aucune dispo auto - a choisir)</span>}
+        </p>
+        <input type="date" className={inp} value={date} onChange={e=>setDate(e.target.value)}/>
+      </div>
+
+      <div>
+        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Duree (optionnel)</p>
+        <div className="flex items-center gap-2">
+          <input type="number" min="0" max="23" className={inp+" !w-20 text-center"} value={dH} onChange={e=>setDH(e.target.value)} placeholder="0"/>
+          <span className="text-sm text-slate-500">h</span>
+          <input type="number" min="0" max="59" step="15" className={inp+" !w-20 text-center"} value={dM} onChange={e=>setDM(e.target.value)} placeholder="00"/>
+          <span className="text-sm text-slate-500">min</span>
+        </div>
+      </div>
+
+      <div className="flex gap-2">
+        <button disabled={busy} onClick={ignore} className="flex-1 border border-slate-200 text-slate-500 rounded-xl py-2.5 text-sm font-semibold disabled:opacity-50">Ignorer</button>
+        <button disabled={busy} onClick={submit} className="flex-1 bg-indigo-600 text-white rounded-xl py-2.5 text-sm font-semibold disabled:opacity-50">Soumettre</button>
+      </div>
+    </div>
+  );
+}
+
+function HostawayImportModal({users,onClose,onSubmitTask}){
+  const [loading,setLoading]=useState(true);
+  const [error,setError]=useState(null);
+  const [tasks,setTasks]=useState([]);
+  const techUser=users.find(u=>u.role==="tech");
+
+  useEffect(()=>{(async()=>{
+    try{
+      const [res,handled]=await Promise.all([
+        fetch("/api/hostaway-import").then(r=>r.json()),
+        st.get("hostaway_handled_ids"),
+      ]);
+      if(res.error)throw new Error(res.error);
+      const handledSet=new Set(handled||[]);
+      const busyDates=techUser?await fetchTechMissionsWindow(techUser.id):new Set();
+
+      const enriched=(res.tasks||[])
+        .filter(t=>!handledSet.has(t.id))
+        .map(t=>{
+          const matchedLocation=matchLocation(t.listingName);
+          const reservations=t.listingId?(res.reservations[t.listingId]||[]):[];
+          const suggestedDate=t.listingId?findFirstAvailableDate(reservations,busyDates):null;
+          return{...t,matchedLocation,suggestedDate};
+        });
+      setTasks(enriched);
+      setLoading(false);
+    }catch(e){
+      setError(e.message);
+      setLoading(false);
+    }
+  })();},[]);
+
+  async function markHandled(id){
+    const handled=await st.get("hostaway_handled_ids")||[];
+    if(!handled.includes(id)){handled.push(id);await st.set("hostaway_handled_ids",handled);}
+  }
+  async function handleSubmit(mission){
+    await onSubmitTask(mission);
+    await markHandled(mission.hostawayId);
+  }
+  async function handleIgnore(id){
+    await markHandled(id);
+  }
+
+  return(
+    <Modal onClose={onClose}>
+      <div className="px-4 pb-8 space-y-4">
+        <div className="flex items-center justify-between pt-2">
+          <div>
+            <h2 className="font-bold text-slate-900 text-lg">Import Hostaway</h2>
+            <p className="text-xs text-slate-400 mt-0.5">Revue avant soumission - rien n'est envoye automatiquement</p>
+          </div>
+          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-full bg-slate-100 text-slate-500 text-sm">✕</button>
+        </div>
+
+        {loading&&<div className="text-center py-16 text-slate-400">Chargement depuis Hostaway...</div>}
+        {error&&<div className="bg-red-50 border border-red-200 rounded-2xl p-4 text-sm text-red-600">Erreur : {error}</div>}
+        {!loading&&!error&&tasks.length===0&&<div className="text-center py-16"><p className="text-slate-500">Aucune nouvelle tache a importer</p></div>}
+        {!loading&&!error&&tasks.length>0&&(
+          <>
+            <p className="text-xs text-slate-400">{tasks.length} tache{tasks.length>1?"s":""} trouvee{tasks.length>1?"s":""}</p>
+            <div className="space-y-3">
+              {tasks.map(t=><HostawayTaskRow key={t.id} task={t} users={users} techUser={techUser} onSubmit={handleSubmit} onIgnore={handleIgnore}/>)}
+            </div>
+          </>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
 // ── ERROR BOUNDARY ───────────────────────────────────────────────────
 class ErrorBoundary extends React.Component{
   constructor(p){super(p);this.state={error:null};}
@@ -1131,6 +1336,7 @@ function App(){
   const [cal,setCal]=useState(()=>{const d=new Date();return{y:d.getFullYear(),m:d.getMonth()};});
   const [selM,setSelM]=useState(null),[showNewMission,setShowNew]=useState(false),[newMissionDate,setNewMissionDate]=useState(today());
   const [showValidation,setShowValidation]=useState(false),[editM,setEditM]=useState(null);
+  const [showHostawayImport,setShowHostawayImport]=useState(false);
   const [globalPending,setGlobalPending]=useState([]);
 
   const monthStr=`${cal.y}-${padM(cal.m)}`;
@@ -1246,7 +1452,7 @@ function App(){
 
   return(
     <div className="relative">
-      {tab==="home"&&<HomeScreen storage={storage} users={users} currentUser={user} onMissionClick={handleMissionClick} onNewMission={()=>handleNewMission()} setTab={setTab} pendingCount={pendingCount} pendingMissions={globalPending} onValidation={()=>setShowValidation(true)}/>}
+      {tab==="home"&&<HomeScreen storage={storage} users={users} currentUser={user} onMissionClick={handleMissionClick} onNewMission={()=>handleNewMission()} setTab={setTab} pendingCount={pendingCount} pendingMissions={globalPending} onValidation={()=>setShowValidation(true)} onHostawayImport={()=>setShowHostawayImport(true)}/>}
       {tab==="calendar"&&<CalendarScreen year={cal.y} month={cal.m} storage={storage} currentUser={user} users={users} selectedDate={selDate} onDayClick={d=>setSelDate(d)} onPrev={()=>setCal(p=>shiftMonth(p.y,p.m,-1))} onNext={()=>setCal(p=>shiftMonth(p.y,p.m,1))} onMissionClick={handleMissionClick} onNewMission={date=>handleNewMission(date)} onExport={exportMonth} onValidateAll={()=>setShowValidation(true)}/>}
       {tab==="board"&&<BoardScreen storage={storage} users={users} currentUser={user} onMissionClick={handleMissionClick} onNewMission={()=>handleNewMission()} onStatusChange={async(m,status)=>patchMission({...m,status},m.date)}/>}
       {tab==="history"&&<HistoryScreen currentUser={user} users={users}/>}
@@ -1281,6 +1487,13 @@ function App(){
             if(editM){await patchMission(m,editM.date);setEditM(null);}
             else{await addMission(m);setShowNew(false);}
           }}/>
+      )}
+      {showHostawayImport&&(
+        <HostawayImportModal
+          users={users}
+          onClose={()=>setShowHostawayImport(false)}
+          onSubmitTask={async m=>{await addMission(m);}}
+        />
       )}
     </div>
   );
