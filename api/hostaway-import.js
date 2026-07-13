@@ -61,13 +61,20 @@ module.exports = async (req, res) => {
     // 1. TOUTES les taches, peu importe leur statut Hostaway (a faire/accepte/en cours/termine)
     //    -> volontaire: Hostaway categorise parfois mal, on ne veut rien louper
     const tasksData = await hostawayGet("/tasks?limit=250", token);
-    const rawTasks = tasksData.result || [];
+    const allRawTasks = tasksData.result || [];
+    // On ne garde que les taches au statut "pending" (= colonne "A faire" sur Hostaway)
+    const rawTasks = allRawTasks.filter((t) => t.status === "pending");
 
-    // 2. Les annonces pour retrouver le nom de l'unite associee a chaque tache
+    // 2. Les annonces pour retrouver l'adresse complete associee a chaque tache
     const listingsData = await hostawayGet("/listings?limit=250", token);
     const listings = {};
     (listingsData.result || []).forEach((l) => {
-      listings[l.id] = l.name || l.internalListingName || l.address || "Annonce " + l.id;
+      const parts = [l.address, l.city, l.zipcode].filter(Boolean);
+      const fullAddress = parts.join(", ");
+      listings[l.id] = {
+        name: l.name || l.internalListingName || "Annonce " + l.id,
+        address: fullAddress || null,
+      };
     });
 
     // 3. Reservations des 120 prochains jours -> pour calculer la 1ere dispo
@@ -102,7 +109,8 @@ module.exports = async (req, res) => {
       description: t.description || "",
       hostawayStatus: t.status || "",
       listingId: t.listingMapId || null,
-      listingName: t.listingMapId ? listings[t.listingMapId] || null : null,
+      listingName: t.listingMapId ? (listings[t.listingMapId]?.name || null) : null,
+      listingAddress: t.listingMapId ? (listings[t.listingMapId]?.address || null) : null,
       createdAt: t.insertedOn || t.createdOn || null,
       attachments: (t.attachments || t.files || [])
         .map((a) => (typeof a === "string" ? a : a.url || a.fileUrl || null))
@@ -111,7 +119,7 @@ module.exports = async (req, res) => {
 
     const payload = { tasks, reservations: reservationsByListing, count: tasks.length };
     if (reservationsError) payload.reservationsError = reservationsError;
-    if (debug) payload.raw = { rawTasks, listings };
+    if (debug) payload.raw = { rawTasks, allRawTasks, listings };
     res.status(200).json(payload);
   } catch (e) {
     res.status(500).json({ error: e.message });

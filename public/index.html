@@ -1156,7 +1156,7 @@ function matchLocation(listingName){
 function HostawayTaskRow({task,users,techUser,onSubmit,onIgnore}){
   const [title,setTitle]=useState(task.title);
   const [location,setLocation]=useState(task.matchedLocation||"CUSTOM");
-  const [locCustom,setLocCustom]=useState(task.matchedLocation?"":(task.listingName||""));
+  const [locCustom,setLocCustom]=useState(task.matchedLocation?"":(task.listingAddress||task.listingName||""));
   const [date,setDate]=useState(task.suggestedDate||"");
   const [dH,setDH]=useState(""),[dM,setDM]=useState("");
   const [busy,setBusy]=useState(false);
@@ -1210,7 +1210,7 @@ function HostawayTaskRow({task,users,techUser,onSubmit,onIgnore}){
       )}
 
       <div>
-        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Lieu {task.listingName&&<span className="text-slate-300 font-normal normal-case">(Hostaway: {task.listingName})</span>}</p>
+        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Lieu {task.listingName&&<span className="text-slate-300 font-normal normal-case">(Hostaway: {task.listingName}{task.listingAddress?" - "+task.listingAddress:""})</span>}</p>
         <select className={inp} value={location} onChange={e=>setLocation(e.target.value)}>
           {BUILDINGS_LIST.map(b=><option key={b} value={b}>{b==="CUSTOM"?"Saisie libre...":b}</option>)}
         </select>
@@ -1261,7 +1261,8 @@ function HostawayImportModal({users,onClose,onSubmitTask}){
       const enriched=(res.tasks||[])
         .filter(t=>!handledSet.has(t.id))
         .map(t=>{
-          const matchedLocation=matchLocation(t.listingName);
+          const bestGuess=t.listingAddress||t.listingName;
+          const matchedLocation=matchLocation(bestGuess);
           const reservations=t.listingId?(res.reservations[t.listingId]||[]):[];
           const suggestedDate=t.listingId?findFirstAvailableDate(reservations,busyDates):null;
           return{...t,matchedLocation,suggestedDate};
