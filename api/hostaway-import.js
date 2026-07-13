@@ -1,6 +1,6 @@
 // Import de taches Hostaway - proxy securise
 // La cle API reste ici, jamais exposee au frontend
-const HOSTAWAY_ACCOUNT_ID = "96311";
+const HOSTAWAY_ACCOUNT_ID = "148614";
 const HOSTAWAY_API_KEY = "038ea2e96cb0da25459f265ed2bf4b4346e1c3852fcd6976c99cf120010154f7";
 
 let cachedToken = null;
