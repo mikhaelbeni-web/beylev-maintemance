@@ -1474,6 +1474,23 @@ function App(){
     return()=>unsub();
   },[cal.y,cal.m,booting]);
 
+  // Ecoute temps reel sur TOUS les mois pertinents (pas seulement celui affiche a l'ecran)
+  // -> corrige le cas ou une intervention (ex: import Hostaway) est soumise pour un mois
+  //    futur different de celui que Laetitia regarde : elle doit quand meme etre alertee
+  //    sans avoir besoin de changer d'onglet ou de recharger la page.
+  useEffect(()=>{
+    if(!window.__CONFIGURED||booting)return;
+    const now=new Date();
+    const unsubs=[];
+    for(let i=-2;i<=6;i++){
+      const d=shiftMonth(now.getFullYear(),now.getMonth(),i);
+      const key=mkKey(d.y,d.m);
+      const unsub=window.__db.collection("app_data").doc(key).onSnapshot(()=>{refreshGlobalPending();},e=>console.error(e));
+      unsubs.push(unsub);
+    }
+    return()=>unsubs.forEach(u=>u());
+  },[booting]);
+
   async function saveUsers(u){setUsers(u);await st.set(SK_USERS,u);}
 
   async function persistCurrent(ns){
