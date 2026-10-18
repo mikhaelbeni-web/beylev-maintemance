@@ -8,7 +8,7 @@ public/manifest.json       PWA
 api/send-email.js          proxy Resend
 api/calendar.js            flux ICS : /api/calendar?user=u3
 api/healthcheck.js         cron quotidien : Firestore, comptes, app, Resend, sauvegarde des comptes, alerte email
-api/monday.js              lecture seule Monday : /api/monday?action=boards | items&board=ID
+api/monday.js              Monday en LECTURE SEULE (GET, requetes query uniquement) : /api/monday?action=boards | items&board=ID
 api/hostaway-import.js     taches Hostaway "pending", adresses des annonces, reservations groupees par listingMapId
 vercel.json                outputDirectory public + cron
 ```
@@ -34,7 +34,8 @@ Chaque document contient `{ v: "<JSON>" }`.
 - `lv_users_v1` : tableau des comptes
 - `lv_missions_AAAA_MM` : `{ "AAAA-MM-JJ": [missions] }`, toujours ecrit dans le mois de la date de debut
 - `lv_companies_v1` : `[{ id, name, addresses: ["adresse"] }]`, une adresse appartient a une seule societe ; le lien se fait sur le texte du champ `location` des missions (casse et accents ignores), les missions ne sont pas modifiees
-- `monday_config` : tableau choisi, correspondance des colonnes, `auto` (import automatique des nouveaux elements a l ouverture puis toutes les 10 min) ; `monday_handled_ids` : elements Monday deja importes ou ignores ; une mission importee porte `mondayId`
+- `lv_addresses_v1` : `["adresse"]`, adresses d intervention ajoutees dans Reglages, en plus de la liste d origine du code
+- `monday_config` : tableau choisi, correspondance des colonnes, `auto` (miroir Monday vers l app a l ouverture puis toutes les 10 min, tant qu un responsable a l app ouverte) ; `monday_handled_ids` : elements importes ou ignores a la main. Une mission Monday porte `mondayId` et `mondayUpdatedAt` : un element modifie dans Monday met a jour la mission, un element supprime de Monday la place dans la corbeille (`deletedBy: "monday"`)
 - `users_trash`, `hostaway_handled_ids`, `hostaway_notifications`, `users_backups`
 - `app_photos/{id}` : `{ b: "<base64>" }`, reference par `mission.photos[{ id }]`
 

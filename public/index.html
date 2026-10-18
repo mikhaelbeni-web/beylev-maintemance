@@ -100,6 +100,8 @@ const HOSTAWAY_IDS_KEY = "hostaway_handled_ids";
 const HOSTAWAY_NOTIFS_KEY = "hostaway_notifications";
 /* Societes : [{ id, name, addresses: ["adresse exacte du champ location"] }]. Les missions ne sont pas modifiees. */
 const COMPANIES_KEY = "lv_companies_v1";
+/* Adresses d intervention ajoutees dans Reglages : ["adresse"], en plus de BUILDINGS_LIST (liste d origine, inchangee) */
+const ADDRESSES_KEY = "lv_addresses_v1";
 const NO_COMPANY = "__none__";
 /* Monday : { boardId, boardName, map: { champ app: id colonne }, auto, defaultTech } et ids deja traites */
 const MONDAY_CONFIG_KEY = "monday_config";
@@ -124,6 +126,12 @@ const TYPE_ICONS = [["plomberie", "🚰"], ["electricite", "⚡"], ["serrurerie"
 
 /* Pas d apostrophes dans ces chaines. */
 const BUILDINGS_LIST = ["55 rue Saint Antoine 75004 Paris", "4 rue Bayard 75008 Paris", "104 boulevard Auguste Blanqui 75013 Paris", "19 rue Brezin 75014 Paris", "50 rue de Buzenval 75020 Paris", "106 rue Saint-Charles 75015 Paris", "171 avenue Jean Baptiste Clement 92140 Clamart", "24 rue Saint Gilles 75003 Paris", "32 rue Picot 75116 Paris", "14 rue des Vertus 75003 Paris", "305 cours Emile Zola 69100 Villeurbanne", "67-69 rue de Douai 75009 Paris", "53 rue de la Harpe 75005 Paris", "81 rue de Sevres 75006 Paris", "29 rue Belgrand 75020 Paris", "250 boulevard Jean Jaures 92100 Boulogne-Billancourt", "16 bis rue Pierre Fontaine 75009 Paris", "15 rue du Grenier Saint Lazare 75003 Paris", "Chemin de l Epinay 14800 Touques", "130 boulevard Massena 75013 Paris", "1-5 rue du Marechal Leclerc 94410 Saint-Maurice", "112-114 rue Oberkampf 75011 Paris", "138 rue du Faubourg Poissonniere 75010 Paris", "24 rue Saint Martin 75004 Paris", "22 rue Duban 75016 Paris", "46 bis rue Saint Didier 75016 Paris", "83 avenue du Roule 92200 Neuilly-sur-Seine", "1-3 rue d Assas 75006 Paris", "14 rue Mouffetard 75005 Paris", "217 avenue de Versailles 75016 Paris", "32 rue Frederick Lemaitre 75020 Paris", "38 rue Lantiez 75017 Paris", "32 rue Saint-Marc 75002 Paris", "93 rue du Commerce 75015 Paris", "RLB Hotel Belleville", "116-118 rue de Belleville 75020 Paris", "109 rue du Temple 75003 Paris", "CC Ozoir", "CUSTOM"];
+
+let EXTRA_ADDRESSES = [];
+function placeList() {
+  const seen = new Set();
+  return [...BUILDINGS_LIST.filter(b => b !== "CUSTOM"), ...EXTRA_ADDRESSES].filter(a => { const k = String(a).toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/g, " ").trim(); if (!k || seen.has(k)) return false; seen.add(k); return true; });
+}
 
 /* Statuts (valeurs existantes) avec couleurs monday, toujours en style inline */
 const STATUSES = [
@@ -348,6 +356,7 @@ function DataProvider({ children }) {
   const idsDoc = useDocValue(HOSTAWAY_IDS_KEY, []);
   const notifsDoc = useDocValue(HOSTAWAY_NOTIFS_KEY, []);
   const companiesDoc = useDocValue(COMPANIES_KEY, []);
+  const addressesDoc = useDocValue(ADDRESSES_KEY, []);
   const mondayCfgDoc = useDocValue(MONDAY_CONFIG_KEY, null);
   const mondayIdsDoc = useDocValue(MONDAY_IDS_KEY, []);
   const live = useLiveMissions();
@@ -382,9 +391,12 @@ function DataProvider({ children }) {
   const users = Array.isArray(usersDoc.value) && usersDoc.value.length ? usersDoc.value : DEFAULT_USERS;
   const companies = useMemo(() => (Array.isArray(companiesDoc.value) ? companiesDoc.value : []), [companiesDoc.value]);
   const companyByAddress = useMemo(() => companyIndex(companies), [companies]);
+  const extraAddresses = useMemo(() => (Array.isArray(addressesDoc.value) ? addressesDoc.value.filter(a => typeof a === "string" && a.trim()) : []), [addressesDoc.value]);
+  EXTRA_ADDRESSES = extraAddresses;
   const value = {
     companies, companyOf: loc => companyByAddress[norm(loc)] || null,
     saveCompanies: c => st.set(COMPANIES_KEY, clean(c)),
+    extraAddresses, saveAddresses: a => st.set(ADDRESSES_KEY, clean(a)),
     mondayConfig: mondayCfgDoc.value, mondayLoaded: mondayCfgDoc.loaded && mondayIdsDoc.loaded,
     mondayIds: Array.isArray(mondayIdsDoc.value) ? mondayIdsDoc.value.map(String) : [],
     saveMondayConfig: c => st.set(MONDAY_CONFIG_KEY, clean(c)),
@@ -393,7 +405,7 @@ function DataProvider({ children }) {
     users, usersLoaded: usersDoc.loaded, usersTrash: Array.isArray(trashDoc.value) ? trashDoc.value : [],
     hostawayIds: Array.isArray(idsDoc.value) ? idsDoc.value.map(String) : [],
     hostawayNotifs: Array.isArray(notifsDoc.value) ? notifsDoc.value : [],
-    missions, deletedMissions, liveStatus: live.status, liveKeys: live.keys, fetchMonths, save,
+    missions, deletedMissions, allMissions, liveStatus: live.status, liveKeys: live.keys, fetchMonths, save,
     saveUsers: u => st.set(USERS_KEY, clean(u)),
     saveUsersTrash: t => st.set(USERS_TRASH_KEY, clean(t)),
     saveHostawayIds: ids => st.set(HOSTAWAY_IDS_KEY, ids),
@@ -421,7 +433,8 @@ function Icon({ name, size = 20 }) {
     camera: <><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" /><circle cx="12" cy="13" r="4" /></>,
     download: <><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><path d="m7 10 5 5 5-5M12 15V3" /></>,
     bell: <><path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.7 21a2 2 0 0 1-3.4 0" /></>,
-    trash: <path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" />
+    trash: <path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" />,
+    building: <><rect x="4" y="3" width="16" height="18" rx="1.5" /><path d="M9 8h2M13 8h2M9 12h2M13 12h2M10 21v-4h4v4" /></>
   };
   return <svg {...p}>{paths[name]}</svg>;
 }
@@ -512,11 +525,11 @@ function MissionModal({ initial, me, onClose, notify }) {
   const isTech = me.role === "tech";
   const activeUsers = users;
   const [m, setM] = useState(() => {
-    const base = { status: "todo", priority: "normal", title: TASK_TYPES[0], location: BUILDINGS_LIST[0], date: todayStr(), assignedTo: (users.find(u => u.role === "tech") || users[0] || {}).id || "", photos: [], comments: [], ...initial };
+    const base = { status: "todo", priority: "normal", title: TASK_TYPES[0], location: placeList()[0], date: todayStr(), assignedTo: (users.find(u => u.role === "tech") || users[0] || {}).id || "", photos: [], comments: [], ...initial };
     return base;
   });
   const [titleMode, setTitleMode] = useState(() => (!initial.title || TASK_TYPES.includes(initial.title) ? (initial.title || TASK_TYPES[0]) : "CUSTOM"));
-  const [locMode, setLocMode] = useState(() => (!initial.location ? BUILDINGS_LIST[0] : BUILDINGS_LIST.includes(initial.location) ? initial.location : "CUSTOM"));
+  const [locMode, setLocMode] = useState(() => (!initial.location ? placeList()[0] : placeList().includes(initial.location) ? initial.location : "CUSTOM"));
   const [busy, setBusy] = useState(false);
   const [comment, setComment] = useState("");
   const [confirmDel, setConfirmDel] = useState(false);
@@ -642,7 +655,7 @@ function MissionModal({ initial, me, onClose, notify }) {
 
       <label className="m-label">Lieu</label>
       <select className="m-input" value={locMode} disabled={!canEditContent} onChange={e => { const v = e.target.value; setLocMode(v); set("location", v === "CUSTOM" ? "" : v); }}>
-        {BUILDINGS_LIST.map(b => <option key={b} value={b}>{b === "CUSTOM" ? "Autre adresse…" : b}</option>)}
+        {[...placeList(), "CUSTOM"].map(b => <option key={b} value={b}>{b === "CUSTOM" ? "Autre adresse…" : b}</option>)}
       </select>
       {locMode === "CUSTOM" && <input className="m-input" style={{ marginTop: 6 }} disabled={!canEditContent} value={m.location || ""} onChange={e => set("location", e.target.value)} placeholder="Adresse complète" />}
       {companyOf(m.location) && <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 4 }}>Société : <b>{companyOf(m.location).name}</b></div>}
@@ -725,7 +738,7 @@ function MissionModal({ initial, me, onClose, notify }) {
 
 /* ===================== TABLEAU (vue principale facon monday) ===================== */
 function MissionTable({ groups, me, onOpen, emptyText }) {
-  const { users, save } = useData();
+  const { users, save, companyOf } = useData();
   const [collapsed, setCollapsed] = useState({});
   const changeStatus = async (m, s) => { try { await save({ ...m, status: s }, m.date); } catch (e) { alert(e.message); } };
   if (!groups.some(g => g.items.length)) return <div className="m-card" style={{ padding: 32, textAlign: "center", color: "var(--muted)" }}>{emptyText || "Aucune intervention"}</div>;
@@ -749,7 +762,7 @@ function MissionTable({ groups, me, onOpen, emptyText }) {
                   <table className="m-table">
                     <thead><tr>
                       <th style={{ minWidth: 240 }}>Intervention</th><th style={{ width: 70 }}>Assigné</th><th style={{ width: 140 }}>Statut</th>
-                      <th style={{ width: 110 }}>Date</th><th style={{ width: 120 }}>Priorité</th><th style={{ minWidth: 200 }}>Lieu</th>
+                      <th style={{ width: 110 }}>Date</th><th style={{ width: 120 }}>Priorité</th><th style={{ minWidth: 200 }}>Lieu</th><th style={{ minWidth: 140 }}>Société</th>
                     </tr></thead>
                     <tbody>
                       {g.items.map(m => {
@@ -769,6 +782,7 @@ function MissionTable({ groups, me, onOpen, emptyText }) {
                             <td style={{ color: late ? "var(--stuck)" : "inherit", fontWeight: late ? 600 : 400, fontSize: 13 }}>{fmtRange(m)}{m.time ? <div style={{ fontSize: 11, color: "var(--muted)" }}>{m.time}</div> : null}</td>
                             <td style={{ padding: 0 }}><div className="m-cell-status" style={{ background: pr.color }}>{pr.label}</div></td>
                             <td style={{ fontSize: 13, textAlign: "left", padding: "0 10px", maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis" }}>{m.location || "—"}</td>
+                            <td style={{ fontSize: 13, textAlign: "left", padding: "0 10px", maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", color: companyOf(m.location) ? "inherit" : "var(--muted)" }}>{(companyOf(m.location) || {}).name || "—"}</td>
                           </tr>
                         );
                       })}
@@ -876,8 +890,7 @@ function HomeScreen({ me, visible, onOpen, onNew, notify }) {
 function matchBuilding(text) {
   const a = norm(text);
   if (!a) return null;
-  for (const b of BUILDINGS_LIST) {
-    if (b === "CUSTOM") continue;
+  for (const b of placeList()) {
     const street = norm(b.replace(/\b\d{5}\b.*$/, ""));
     if (street && a.includes(street)) return b;
   }
@@ -988,7 +1001,7 @@ function HostawayImport({ me, onClose, notify }) {
               <input className="m-input" value={r.title} onChange={e => upd(i, "title", e.target.value)} />
               <textarea className="m-input" style={{ marginTop: 6 }} rows={3} value={r.description} onChange={e => upd(i, "description", e.target.value)} placeholder="Description" />
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2" style={{ marginTop: 6 }}>
-                <select className="m-input" value={r.location} onChange={e => upd(i, "location", e.target.value)}>{BUILDINGS_LIST.map(b => <option key={b} value={b}>{b === "CUSTOM" ? "Autre adresse…" : b}</option>)}</select>
+                <select className="m-input" value={r.location} onChange={e => upd(i, "location", e.target.value)}>{[...placeList(), "CUSTOM"].map(b => <option key={b} value={b}>{b === "CUSTOM" ? "Autre adresse…" : b}</option>)}</select>
                 <input type="date" className="m-input" value={r.date} onChange={e => { const v = e.target.value; upd(i, "date", v); if (isWeekend(v)) notify("Pas d’intervention le samedi ni le dimanche", true); }} />
               </div>
               {r.location === "CUSTOM" && <input className="m-input" style={{ marginTop: 6 }} value={r.custom} onChange={e => upd(i, "custom", e.target.value)} placeholder="Adresse" />}
@@ -1010,7 +1023,8 @@ const MONDAY_FIELDS = [
   { id: "status", label: "Statut", keys: ["statut", "status", "etat"] },
   { id: "assignee", label: "Technicien", keys: ["technicien", "personne", "assigne", "responsable", "owner", "people", "intervenant"] },
   { id: "description", label: "Description", keys: ["description", "notes", "note", "detail", "comment", "probleme"] },
-  { id: "duration", label: "Durée (minutes)", keys: ["duree", "duration", "temps", "minutes"] }
+  { id: "duration", label: "Durée (minutes)", keys: ["duree", "duration", "temps", "minutes"] },
+  { id: "priority", label: "Priorité", keys: ["priorite", "priority", "urgence"] }
 ];
 const NAME_COL = "__name__";
 const fetchJson = url => fetch(url).then(r => r.json().then(j => { if (!r.ok) throw new Error(j.error || "HTTP " + r.status); return j; }));
@@ -1034,11 +1048,12 @@ function mondayStatus(text) {
    (« VERSAILLES SOL »). Un mot distinctif de la rue qui ne designe qu un seul immeuble suffit ; plusieurs
    immeubles possibles ou aucun : pas d adresse, a choisir dans l apercu. */
 const STREET_STOP = new Set("rue avenue boulevard bd av de du la le les des d l saint st bis cours chemin paris cc hotel".split(" "));
-let streetTokens = null;
+let streetTokens = null, streetTokensKey = "";
 function guessBuilding(text) {
   const exact = matchBuilding(text); if (exact) return exact;
   const a = norm(text); if (!a) return null;
-  if (!streetTokens) streetTokens = BUILDINGS_LIST.filter(b => b !== "CUSTOM").map(b => [b, norm(b.replace(/\b\d{5}\b.*$/, "")).split(" ").filter(t => t.length > 2 && !STREET_STOP.has(t) && !/^\d+$/.test(t))]);
+  const places = placeList(), key = places.join("|");
+  if (!streetTokens || key !== streetTokensKey) { streetTokensKey = key; streetTokens = places.map(b => [b, norm(b.replace(/\b\d{5}\b.*$/, "")).split(" ").filter(t => t.length > 2 && !STREET_STOP.has(t) && !/^\d+$/.test(t))]); }
   const words = new Set(a.split(" "));
   const hits = streetTokens.filter(([, ts]) => ts.some(t => words.has(t)));
   return hits.length === 1 ? hits[0][0] : null;
@@ -1057,7 +1072,8 @@ function mondayToMission(item, map, users, defaultTech, me) {
     id: uid(), mondayId: item.id, title: val("title") || item.name || "Élément Monday",
     location: matchBuilding(loc) || loc || guessed || "", description: val("description"),
     date: dates[0] || created, status: mondayStatus(val("status")), assignedTo: (tech || {}).id || defaultTech,
-    priority: "normal", duration: parseInt(val("duration"), 10) || 0, approved: true,
+    priority: /critique|urgent/.test(norm(val("priority"))) ? "urgent" : "normal", duration: parseInt(val("duration"), 10) || 0, approved: true,
+    mondayUpdatedAt: item.updatedAt || null,
     createdBy: me.id, createdAt: new Date().toISOString(), photos: [], comments: []
   };
   if (dates[1] && dates[1] > m.date) m.dateEnd = dates[1];
@@ -1065,33 +1081,76 @@ function mondayToMission(item, map, users, defaultTech, me) {
   return { mission: m, noDate: !dates.length, noTech: !tech, guessedPlace: !!guessed };
 }
 
-/* Synchro Monday -> app : les nouveaux elements du tableau sont importes a l ouverture puis toutes les 10 minutes */
+/* Miroir Monday -> app (lecture seule : l app ne modifie jamais Monday).
+   - nouveaux elements : crees (sauf ceux ignores a la main dans l import)
+   - elements modifies dans Monday : titre, dates, heure, statut, description, technicien, priorite, duree et adresse (si colonne adresse) mis a jour ;
+     les modifications faites dans l app sur un element restent jusqu a la prochaine modification de cet element dans Monday
+   - elements supprimes de Monday : places dans la corbeille de l app (30 jours), jamais supprimes definitivement
+   - photos, commentaires et validation propres a l app ne sont jamais touches */
+function planMondaySync(items, cfg, { allMissions, users, ignored, me }) {
+  const map = cfg.map || {};
+  const byMid = {}; allMissions.forEach(m => { if (m.mondayId) byMid[m.mondayId] = m; });
+  const seen = new Set(items.map(i => i.id));
+  const create = [], update = [], restored = [];
+  items.forEach(it => {
+    const cur = byMid[it.id];
+    if (!cur) { if (!ignored.has(it.id)) create.push(mondayToMission(it, map, users, cfg.defaultTech, me).mission); return; }
+    if (cur.deletedAt && cur.deletedBy !== "monday") return; // supprimee a la main dans l app : respectee
+    if (!cur.deletedAt && cur.mondayUpdatedAt && cur.mondayUpdatedAt === it.updatedAt) return;
+    const n = mondayToMission(it, map, users, cfg.defaultTech, me).mission;
+    const { mondayUpdatedAt, ...base } = cur;
+    const next = { ...base, title: n.title, date: n.date, status: n.status, description: n.description, assignedTo: n.assignedTo, duration: n.duration, priority: n.priority };
+    if (n.dateEnd) next.dateEnd = n.dateEnd; else delete next.dateEnd;
+    if (n.time) next.time = n.time; else delete next.time;
+    if (map.location && (it.values[map.location] || "").trim()) next.location = n.location;
+    if (cur.deletedAt) { delete next.deletedAt; delete next.deletedBy; restored.push(it.id); }
+    if (JSON.stringify(next) !== JSON.stringify(base) || cur.deletedAt) update.push({ next: { ...next, mondayUpdatedAt: it.updatedAt || null }, prevDate: cur.date });
+  });
+  const mirrored = allMissions.filter(m => m.mondayId && !m.deletedAt);
+  let remove = mirrored.filter(m => !seen.has(m.mondayId));
+  // garde-fou : une lecture partielle ne doit jamais vider l app
+  const blocked = remove.length > Math.max(5, mirrored.length * 0.5);
+  if (blocked) remove = [];
+  return { create, update, remove, blocked };
+}
+
 function useMondayAutoSync(me, notify) {
-  const { mondayConfig, mondayLoaded, mondayIds, saveMondayIds, missions, users, importMissions } = useData();
-  const latest = useRef({}); latest.current = { mondayIds, missions, users };
+  const data = useData();
+  const { mondayConfig, mondayLoaded } = data;
+  const latest = useRef({}); latest.current = data;
   const running = useRef(false);
-  const enabled = !!(me && me.role !== "tech" && mondayLoaded && mondayConfig && mondayConfig.auto && mondayConfig.boardId);
+  const canRun = !!(me && me.role !== "tech" && mondayLoaded && mondayConfig && mondayConfig.boardId);
+  const auto = canRun && mondayConfig.auto !== false;
   useEffect(() => {
-    if (!enabled) return;
-    const run = async () => {
+    if (!canRun) return;
+    const run = async manual => {
       if (running.current) return; running.current = true;
       try {
-        const { items } = await fetchJson(`/api/monday?action=items&board=${mondayConfig.boardId}`);
-        const { mondayIds, missions, users } = latest.current;
-        const known = new Set([...mondayIds, ...missions.map(m => m.mondayId).filter(Boolean)]);
-        const fresh = items.filter(it => !known.has(it.id));
-        if (!fresh.length) return;
-        const list = fresh.map(it => mondayToMission(it, mondayConfig.map || {}, users, mondayConfig.defaultTech, me).mission);
-        const n = await importMissions(list);
-        await saveMondayIds([...new Set([...mondayIds, ...fresh.map(it => it.id)])]);
-        if (n) notify(`${n} élément${n > 1 ? "s" : ""} Monday importé${n > 1 ? "s" : ""}`);
-      } catch (e) { console.warn("Synchro Monday", e); }
+        const cfg = latest.current.mondayConfig;
+        const { items } = await fetchJson(`/api/monday?action=items&board=${cfg.boardId}`);
+        const d = latest.current;
+        const ignored = new Set(d.mondayIds);
+        const plan = planMondaySync(items, cfg, { allMissions: d.allMissions, users: d.users, ignored, me });
+        const created = plan.create.length ? await d.importMissions(plan.create) : 0;
+        for (const u of plan.update) await d.save(u.next, u.prevDate);
+        for (const m of plan.remove) await d.save({ ...m, deletedAt: new Date().toISOString(), deletedBy: "monday" }, m.date);
+        if (plan.create.length) await d.saveMondayIds([...new Set([...d.mondayIds, ...plan.create.map(m => m.mondayId)])]);
+        const parts = [];
+        if (created) parts.push(`${created} ajout${created > 1 ? "s" : ""}`);
+        if (plan.update.length) parts.push(`${plan.update.length} modification${plan.update.length > 1 ? "s" : ""}`);
+        if (plan.remove.length) parts.push(`${plan.remove.length} suppression${plan.remove.length > 1 ? "s" : ""}`);
+        if (plan.blocked) notify("Monday : suppressions ignorées (trop nombreuses d’un coup, vérifiez le tableau)", true);
+        else if (parts.length) notify("Monday synchronisé : " + parts.join(", "));
+        else if (manual) notify("Monday synchronisé : déjà à jour");
+      } catch (e) { console.warn("Synchro Monday", e); if (manual) notify("Synchro Monday impossible : " + e.message, true); }
       finally { running.current = false; }
     };
-    run();
-    const t = setInterval(run, 10 * 60000);
-    return () => clearInterval(t);
-  }, [enabled, JSON.stringify(mondayConfig)]);
+    const onEvt = () => run(true);
+    window.addEventListener("monday-sync", onEvt);
+    let t = null;
+    if (auto) { run(false); t = setInterval(() => run(false), 10 * 60000); }
+    return () => { window.removeEventListener("monday-sync", onEvt); if (t) clearInterval(t); };
+  }, [canRun, auto, JSON.stringify(mondayConfig)]);
 }
 
 function MondayImport({ me, onClose, notify }) {
@@ -1104,7 +1163,6 @@ function MondayImport({ me, onClose, notify }) {
   const [map, setMap] = useState(cfg.map || null);
   const [defaultTech, setDefaultTech] = useState(cfg.defaultTech || (techs[0] || users[0] || {}).id);
   const [auto, setAuto] = useState(cfg.auto !== false);
-  const [hideDone, setHideDone] = useState(false);
   const [excluded, setExcluded] = useState({});
   const [addr, setAddr] = useState({});
   const addresses = useAllAddresses();
@@ -1123,7 +1181,7 @@ function MondayImport({ me, onClose, notify }) {
 
   const known = new Set([...mondayIds, ...missions.map(m => m.mondayId).filter(Boolean)]);
   const rows = data && map ? data.items.filter(it => !known.has(it.id)).map(it => ({ item: it, ...mondayToMission(it, map, users, defaultTech, me) })) : [];
-  const shown = rows.filter(r => !hideDone || r.mission.status !== "done");
+  const shown = rows;
   const selected = shown.filter(r => !excluded[r.item.id]);
   const noPlace = selected.filter(r => !r.mission.location && !addr[r.item.id]).length;
   const already = data ? data.items.length - rows.length : 0;
@@ -1132,8 +1190,8 @@ function MondayImport({ me, onClose, notify }) {
     setBusy(true);
     try {
       const n = selected.length ? await importMissions(selected.map(r => addr[r.item.id] ? { ...r.mission, location: addr[r.item.id] } : r.mission)) : 0;
-      // Les elements decoches ou masques sont marques ignores : la synchro auto ne les reprendra pas
-      await saveMondayIds([...new Set([...mondayIds, ...rows.map(r => r.item.id)])]);
+      // Importes + decoches (ignores a vie) : la synchro ne recree jamais un element decoche
+      await saveMondayIds([...new Set([...mondayIds, ...selected.map(r => r.item.id), ...rows.filter(r => excluded[r.item.id]).map(r => r.item.id)])]);
       await saveMondayConfig({ boardId, boardName: data.board.name, map, defaultTech, auto, updatedAt: new Date().toISOString(), updatedBy: me.id });
       notify(n ? `${n} intervention${n > 1 ? "s" : ""} importée${n > 1 ? "s" : ""} depuis Monday` : "Réglages Monday enregistrés");
       onClose();
@@ -1146,10 +1204,11 @@ function MondayImport({ me, onClose, notify }) {
   return (
     <Modal wide onClose={onClose} title="Import Monday"
       footer={<>
+        {cfg.boardId && <button className="m-btn-sec" style={{ marginRight: "auto" }} onClick={() => { window.dispatchEvent(new Event("monday-sync")); onClose(); }}>Synchroniser maintenant</button>}
         <button className="m-btn-sec" onClick={onClose}>Annuler</button>
         <button className="m-btn" disabled={busy || !data || !map} onClick={submit}>{selected.length ? `Importer ${selected.length} intervention${selected.length > 1 ? "s" : ""}` : "Enregistrer les réglages"}</button>
       </>}>
-      <p style={{ color: "var(--muted)", fontSize: 14, marginTop: 0 }}>L’app lit votre tableau Monday sans jamais le modifier. Choisissez le tableau, vérifiez quelle colonne correspond à quoi, puis importez. Un élément déjà importé ne revient jamais.</p>
+      <p style={{ color: "var(--muted)", fontSize: 14, marginTop: 0 }}>L’app lit votre tableau Monday en lecture seule : elle n’y écrit jamais. Choisissez le tableau, vérifiez quelle colonne correspond à quoi, puis importez. Avec la synchronisation automatique, l’app reste identique à Monday : ajouts, modifications et suppressions (placées dans la corbeille, jamais effacées).</p>
       {error && <div style={{ background: "#ffebee", color: "#b00020", padding: 12, borderRadius: 6, marginBottom: 12, fontSize: 14 }}>{error}{/MONDAY_API_TOKEN/.test(error) && <div style={{ marginTop: 4 }}>Ajoutez le jeton Monday dans Vercel (Settings &gt; Environment Variables) puis redéployez.</div>}</div>}
       <label className="m-label" style={{ marginTop: 0 }}>Tableau Monday</label>
       <select className="m-input" value={boardId} onChange={e => { setBoardId(e.target.value); setExcluded({}); }}>
@@ -1179,13 +1238,12 @@ function MondayImport({ me, onClose, notify }) {
         </div>
         <label className="flex items-start gap-2" style={{ marginTop: 14, fontSize: 14, background: "#e5f4ff", padding: 10, borderRadius: 6 }}>
           <input type="checkbox" checked={auto} onChange={e => setAuto(e.target.checked)} style={{ marginTop: 3 }} />
-          <span><b>Importer automatiquement les nouveaux éléments</b><br /><span style={{ color: "var(--muted)" }}>Chaque élément créé ensuite dans ce tableau arrive tout seul dans l’app (vérification à l’ouverture puis toutes les 10 minutes). Décochez quand l’équipe n’utilise plus Monday.</span></span>
+          <span><b>Garder l’app identique à Monday</b><br /><span style={{ color: "var(--muted)" }}>À l’ouverture de l’app puis toutes les 10 minutes, tant qu’un responsable a l’app ouverte : nouveaux éléments, changements de date, de statut ou de technicien, éléments supprimés. Décochez quand l’équipe n’utilise plus Monday.</span></span>
         </label>
 
         <div className="flex items-center justify-between flex-wrap gap-2" style={{ margin: "16px 0 6px" }}>
           <b>{rows.length} nouvel{rows.length > 1 ? "s" : ""} élément{rows.length > 1 ? "s" : ""}{already ? <span style={{ fontWeight: 400, color: "var(--muted)" }}> · {already} déjà importé{already > 1 ? "s" : ""} ou ignoré{already > 1 ? "s" : ""}</span> : null}</b>
           <div className="flex items-center gap-3" style={{ fontSize: 13 }}>
-            <label className="flex items-center gap-1"><input type="checkbox" checked={hideDone} onChange={e => setHideDone(e.target.checked)} /> Masquer les terminés</label>
             <button style={{ border: 0, background: "none", color: "#0073ea", padding: 0 }} onClick={() => setExcluded(Object.fromEntries(shown.map(r => [r.item.id, !selected.length ? false : true])))}>{selected.length ? "Tout décocher" : "Tout cocher"}</button>
           </div>
         </div>
@@ -1213,14 +1271,14 @@ function MondayImport({ me, onClose, notify }) {
           {!shown.length && <div style={{ padding: 16, textAlign: "center", color: "var(--muted)", fontSize: 14 }}>Rien de nouveau dans ce tableau.</div>}
         </div>
         {noPlace > 0 && <div style={{ background: "#fff4e5", color: "#8a5300", padding: "8px 12px", borderRadius: 6, fontSize: 13, marginTop: 8 }}>{noPlace} intervention{noPlace > 1 ? "s" : ""} sans adresse. {noPlace > 1 ? "Elles ne sortiront pas" : "Elle ne sortira pas"} dans le récap par société tant que l’adresse n’est pas choisie (ici ou plus tard dans l’intervention).</div>}
-        <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 6 }}>En orange : valeur devinée (date de création, technicien par défaut) ou manquante. Les éléments décochés ou masqués seront ignorés définitivement. Les interventions importées sont déjà validées et restent modifiables dans l’app.</div>
+        <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 6 }}>En orange : valeur devinée (date de création, technicien par défaut) ou manquante. Les éléments décochés sont ignorés définitivement. Les interventions importées sont déjà validées et restent modifiables dans l’app.</div>
       </>)}
     </Modal>
   );
 }
 
-function PlanningScreen({ me, visible, onOpen, onNew }) {
-  const { fetchMonths } = useData();
+function PlanningScreen({ me, visible, onOpen, onNew, filters, setFilters }) {
+  const { fetchMonths, companyOf } = useData();
   const [view, setView] = useState("month");
   const [cursor, setCursor] = useState(() => { const d = new Date(); return { y: d.getFullYear(), m: d.getMonth() }; });
   const [selDay, setSelDay] = useState(null);
@@ -1229,7 +1287,7 @@ function PlanningScreen({ me, visible, onOpen, onNew }) {
     else fetchMonths(Array.from({ length: 12 }, (_, i) => monthKeyYM(cursor.y, i)));
   }, [view, cursor.y, cursor.m, fetchMonths]);
 
-  const shown = visible.filter(m => m.approved !== "rejected");
+  const shown = applyFilters(visible.filter(m => m.approved !== "rejected" || filters.status === "rejected"), filters, companyOf);
   const byDate = useMemo(() => {
     const o = {};
     shown.forEach(m => { const e = endOf(m); let d = m.date; for (let i = 0; d <= e && i < 62; i++, d = addDays(d, 1)) (o[d] = o[d] || []).push(m); });
@@ -1253,6 +1311,7 @@ function PlanningScreen({ me, visible, onOpen, onNew }) {
         actions={me.role !== "tech" && <button className="m-btn" onClick={() => onNew({ date: selDay || today })}><span className="inline-flex items-center gap-1"><Icon name="plus" size={16} /> Nouvelle intervention</span></button>}
         tabs={<><button className={"m-tab" + (view === "month" ? " active" : "")} onClick={() => setView("month")}>Mois</button><button className={"m-tab" + (view === "year" ? " active" : "")} onClick={() => setView("year")}>Année</button></>} />
       <div className="p-4 md:p-8">
+        <FilterBar f={filters} setF={setFilters} me={me} noPeriod />
         <div className="flex items-center gap-2" style={{ marginBottom: 12 }}>
           <button className="m-btn-sec" style={{ padding: "6px 8px" }} onClick={() => move(-1)}><Icon name="left" size={18} /></button>
           <button className="m-btn-sec" onClick={() => { const d = new Date(); setCursor({ y: d.getFullYear(), m: d.getMonth() }); }}>Aujourd’hui</button>
@@ -1314,8 +1373,8 @@ function PlanningScreen({ me, visible, onOpen, onNew }) {
 }
 
 /* ===================== KANBAN ===================== */
-function KanbanScreen({ me, visible, onOpen }) {
-  const { users, save, fetchMonths } = useData();
+function KanbanScreen({ me, visible, onOpen, filters, setFilters }) {
+  const { users, save, fetchMonths, companyOf } = useData();
   const [dragId, setDragId] = useState(null);
   const [over, setOver] = useState(null);
   const now = new Date();
@@ -1323,7 +1382,9 @@ function KanbanScreen({ me, visible, onOpen }) {
   const end = ymd(new Date(now.getFullYear(), now.getMonth() + 6, 0));
   useEffect(() => { const k = []; for (let i = 0; i < 6; i++) { const d = new Date(now.getFullYear(), now.getMonth() + i, 1); k.push(monthKeyYM(d.getFullYear(), d.getMonth())); } fetchMonths(k); }, []);
   // 6 mois (mois courant + 5) et interventions encore ouvertes des mois precedents
-  const items = visible.filter(m => m.approved !== "rejected" && ((m.date >= start && m.date <= end) || (m.status !== "done" && m.status !== "cancelled" && m.date < start)));
+  // Une periode choisie remplace la fenetre par defaut
+  const period = !!(filters.from || filters.to);
+  const items = applyFilters(visible.filter(m => (m.approved !== "rejected" || filters.status === "rejected") && (period || (m.date >= start && m.date <= end) || (m.status !== "done" && m.status !== "cancelled" && m.date < start))), filters, companyOf);
   const canDrag = m => isApproved(m) && (me.role !== "tech" || m.assignedTo === me.id);
   const drop = async sid => {
     const m = items.find(x => x.id === dragId); setOver(null); setDragId(null);
@@ -1332,8 +1393,9 @@ function KanbanScreen({ me, visible, onOpen }) {
   };
   return (
     <div>
-      <PageHeader title="Tableau" subtitle="Glissez-déposez les cartes pour changer leur statut · 6 mois" />
+      <PageHeader title="Tableau" subtitle={`Glissez-déposez les cartes pour changer leur statut · ${period ? "période choisie" : "6 mois"}`} />
       <div className="p-4 md:p-8">
+        <FilterBar f={filters} setF={setFilters} me={me} />
         <div className="flex gap-4" style={{ overflowX: "auto", paddingBottom: 12 }}>
           {STATUSES.map(s => {
             const list = items.filter(m => (m.status || "todo") === s.id).sort((a, b) => (a.date + (a.time || "")).localeCompare(b.date + (b.time || "")));
@@ -1351,7 +1413,7 @@ function KanbanScreen({ me, visible, onOpen }) {
                       <div key={m.id} className="kan-card" draggable={canDrag(m)} onDragStart={e => { setDragId(m.id); e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", m.id); }} onDragEnd={() => { setDragId(null); setOver(null); }}
                         onClick={() => onOpen(m)} style={{ opacity: dragId === m.id ? 0.5 : 1, borderLeft: `4px solid ${statusColor(m)}` }}>
                         <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 4 }}>{iconOf(m.title)} {m.title}</div>
-                        <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 6 }}>{m.location || "—"}</div>
+                        <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 6 }}>{m.location || "—"}{companyOf(m.location) ? ` · ${companyOf(m.location).name}` : ""}</div>
                         <div className="flex items-center justify-between gap-1">
                           <span style={{ fontSize: 12, fontWeight: 500, color: late ? "#df2f4a" : "var(--text)" }}>📅 {fmtRange(m)}{m.time ? " " + m.time : ""}</span>
                           <div className="flex items-center gap-1">
@@ -1376,14 +1438,14 @@ function KanbanScreen({ me, visible, onOpen }) {
 /* ===================== HISTORIQUE ===================== */
 /* Liste de toutes les adresses connues : liste fixe + adresses libres saisies dans les missions */
 function useAllAddresses() {
-  const { missions } = useData();
+  const { missions, extraAddresses } = useData();
   return useMemo(() => {
     const seen = new Set(); const out = [];
     const add = a => { const t = String(a || "").trim(); const k = norm(t); if (t && t !== "CUSTOM" && !seen.has(k)) { seen.add(k); out.push(t); } };
-    BUILDINGS_LIST.forEach(add);
+    placeList().forEach(add);
     missions.map(m => m.location).sort().forEach(add);
     return out;
-  }, [missions]);
+  }, [missions, extraAddresses]);
 }
 
 function MultiSelect({ label, allLabel, options, value, onChange }) {
@@ -1444,41 +1506,73 @@ function periodRange(id) {
 }
 const fmtMinutes = n => (!n ? "—" : n < 60 ? `${n} min` : `${Math.floor(n / 60)} h${n % 60 ? pad(n % 60) : ""}`);
 
-function HistoryScreen({ me, visible, onOpen }) {
-  const { fetchMonths, companies, companyOf, users } = useData();
+/* Filtres partages par Planning, Tableau et Historique : le choix reste quand on change d onglet */
+const EMPTY_FILTERS = { q: "", status: "", from: "", to: "", companies: [], addresses: [] };
+const hasFilters = f => !!(f.q || f.status || f.from || f.to || f.companies.length || f.addresses.length);
+function applyFilters(list, f, companyOf) {
+  return list.filter(m => {
+    if (f.companies.length && !f.companies.includes((companyOf(m.location) || { id: NO_COMPANY }).id)) return false;
+    if (f.addresses.length && !f.addresses.some(a => norm(a) === norm(m.location))) return false;
+    if (f.status === "pending") { if (m.approved !== false) return false; }
+    else if (f.status === "rejected") { if (m.approved !== "rejected") return false; }
+    else if (f.status && (!isApproved(m) || (m.status || "todo") !== f.status)) return false;
+    if (f.from && endOf(m) < f.from) return false;
+    if (f.to && m.date > f.to) return false;
+    if (f.q) { const t = norm(f.q); if (!norm([m.title, m.description, m.location, (companyOf(m.location) || {}).name, ...(m.comments || []).map(c => c.text)].join(" ")).includes(t)) return false; }
+    return true;
+  });
+}
+function FilterBar({ f, setF, me, noPeriod }) {
+  const { fetchMonths, companies, companyOf } = useData();
   const addresses = useAllAddresses();
-  const [q, setQ] = useState("");
-  const [status, setStatus] = useState("");
-  const [from, setFrom] = useState("");
-  const [to, setTo] = useState("");
-  const [selCompanies, setSelCompanies] = useState([]);
-  const [selAddresses, setSelAddresses] = useState([]);
-  const [groupBy, setGroupBy] = useState("month");
-  const canBill = me.role !== "tech";
-
-  const defaultMonths = useMemo(() => { const now = new Date(); const out = []; for (let i = 6; i >= -12; i--) { const d = new Date(now.getFullYear(), now.getMonth() + i, 1); out.push(monthKeyYM(d.getFullYear(), d.getMonth())); } return out; }, []);
-  useEffect(() => { fetchMonths(defaultMonths); }, [fetchMonths, defaultMonths]);
+  const set = (k, v) => setF(p => ({ ...p, [k]: v }));
   // Une periode hors de la fenetre par defaut charge les mois correspondants
-  useEffect(() => { if (from || to) fetchMonths(monthKeysBetween(from || to, to || from)); }, [from, to, fetchMonths]);
-
-  const companyIdOf = m => { const c = companyOf(m.location); return c ? c.id : NO_COMPANY; };
+  useEffect(() => { if (f.from || f.to) fetchMonths(monthKeysBetween(f.from || f.to, f.to || f.from)); }, [f.from, f.to, fetchMonths]);
   // Les adresses proposees se limitent aux societes cochees
   const addressOptions = addresses
-    .filter(a => !selCompanies.length || selCompanies.includes((companyOf(a) || { id: NO_COMPANY }).id))
+    .filter(a => !f.companies.length || f.companies.includes((companyOf(a) || { id: NO_COMPANY }).id))
     .map(a => ({ id: a, label: a, hint: (companyOf(a) || {}).name }));
   const companyOptions = [...companies.map(c => ({ id: c.id, label: c.name, hint: `${(c.addresses || []).length} adr.` })).sort((a, b) => a.label.localeCompare(b.label)), { id: NO_COMPANY, label: "Sans société" }];
+  const activePeriod = PERIODS.find(p => { const [a, b] = periodRange(p.id); return a === f.from && b === f.to; });
+  return (
+    <div style={{ marginBottom: 16 }}>
+      {!noPeriod && (
+        <div className="flex flex-wrap gap-2 items-center" style={{ marginBottom: 10 }}>
+          {PERIODS.map(p => <button key={p.id} className={activePeriod && activePeriod.id === p.id ? "m-btn" : "m-btn-sec"} style={{ padding: "5px 12px" }} onClick={() => { const [a, b] = periodRange(p.id); setF(x => ({ ...x, from: a, to: b })); }}>{p.label}</button>)}
+          <div className="flex items-center gap-1" style={{ fontSize: 13, color: "var(--muted)" }}>
+            du <input type="date" className="m-input" style={{ width: 150, padding: "5px 8px" }} value={f.from} max={f.to || undefined} onChange={e => set("from", e.target.value)} />
+            au <input type="date" className="m-input" style={{ width: 150, padding: "5px 8px" }} value={f.to} min={f.from || undefined} onChange={e => set("to", e.target.value)} />
+          </div>
+        </div>
+      )}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
+        <MultiSelect label="sociétés" allLabel="Toutes les sociétés" options={companyOptions} value={f.companies} onChange={v => setF(p => ({ ...p, companies: v, addresses: [] }))} />
+        <MultiSelect label="adresses" allLabel="Toutes les adresses" options={addressOptions} value={f.addresses} onChange={v => set("addresses", v)} />
+        <select className="m-input" value={f.status} onChange={e => set("status", e.target.value)}>
+          <option value="">Tous les statuts</option>
+          {STATUSES.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
+          {me.role !== "tech" && <option value="pending">En validation</option>}
+          {me.role !== "tech" && <option value="rejected">Refusées</option>}
+        </select>
+        <div style={{ position: "relative" }}>
+          <span style={{ position: "absolute", left: 10, top: 10, color: "var(--muted)" }}><Icon name="search" size={18} /></span>
+          <input className="m-input" style={{ paddingLeft: 34 }} placeholder="Rechercher" value={f.q} onChange={e => set("q", e.target.value)} />
+        </div>
+      </div>
+      {hasFilters(f) && <button style={{ border: 0, background: "none", color: "#0073ea", fontSize: 14, marginTop: 8, padding: 0 }} onClick={() => setF(EMPTY_FILTERS)}>Effacer tous les filtres</button>}
+    </div>
+  );
+}
 
-  const filtered = visible.filter(m => {
-    if (selCompanies.length && !selCompanies.includes(companyIdOf(m))) return false;
-    if (selAddresses.length && !selAddresses.some(a => norm(a) === norm(m.location))) return false;
-    if (status === "pending") { if (m.approved !== false) return false; }
-    else if (status === "rejected") { if (m.approved !== "rejected") return false; }
-    else if (status && (!isApproved(m) || (m.status || "todo") !== status)) return false;
-    if (from && endOf(m) < from) return false;
-    if (to && m.date > to) return false;
-    if (q) { const s = norm(q); if (!norm([m.title, m.description, m.location, (companyOf(m.location) || {}).name, ...(m.comments || []).map(c => c.text)].join(" ")).includes(s)) return false; }
-    return true;
-  }).sort((a, b) => b.date.localeCompare(a.date));
+function HistoryScreen({ me, visible, onOpen, filters, setFilters }) {
+  const { fetchMonths, companies, companyOf, users } = useData();
+  const [groupBy, setGroupBy] = useState("month");
+  const canBill = me.role !== "tech";
+  const defaultMonths = useMemo(() => { const now = new Date(); const out = []; for (let i = 6; i >= -12; i--) { const d = new Date(now.getFullYear(), now.getMonth() + i, 1); out.push(monthKeyYM(d.getFullYear(), d.getMonth())); } return out; }, []);
+  useEffect(() => { fetchMonths(defaultMonths); }, [fetchMonths, defaultMonths]);
+  const { from, to } = filters;
+
+  const filtered = applyFilters(visible, filters, companyOf).sort((a, b) => b.date.localeCompare(a.date));
 
   const groups = []; const map = {};
   filtered.forEach(m => {
@@ -1500,10 +1594,6 @@ function HistoryScreen({ me, visible, onOpen }) {
     return acc;
   }, {})).sort((a, b) => (a.key === NO_COMPANY) - (b.key === NO_COMPANY) || b.n - a.n);
 
-  const activePeriod = PERIODS.find(p => { const [f, t] = periodRange(p.id); return f === from && t === to; });
-  const hasFilters = !!(q || status || from || to || selCompanies.length || selAddresses.length);
-  const reset = () => { setQ(""); setStatus(""); setFrom(""); setTo(""); setSelCompanies([]); setSelAddresses([]); };
-
   function exportCsv() {
     const userName = id => (users.find(u => u.id === id) || {}).name || "";
     const rows = [["Date début", "Date fin", "Heure", "Société", "Adresse", "Intervention", "Description", "Statut", "Technicien", "Durée (min)", "Priorité", "Hostaway"]];
@@ -1511,7 +1601,7 @@ function HistoryScreen({ me, visible, onOpen }) {
       m.date, endOf(m), m.time || "", (companyOf(m.location) || {}).name || "", m.location || "", m.title || "", (m.description || "").replace(/\s+/g, " ").trim(),
       statusText(m), userName(m.assignedTo), Number(m.duration) || "", (PRIORITY_BY_ID[m.priority] || PRIORITY_BY_ID.normal).label.replace(/\s*⚠️/, ""), m.hostawayId ? "oui" : ""
     ]));
-    const sel = companies.filter(c => selCompanies.includes(c.id)).map(c => norm(c.name).replace(/ /g, "-"));
+    const sel = companies.filter(c => filters.companies.includes(c.id)).map(c => norm(c.name).replace(/ /g, "-"));
     const name = ["interventions", sel.length === 1 ? sel[0] : "", from || "debut", to || todayStr()].filter(Boolean).join("_");
     downloadCsv(`${name}.csv`, rows);
   }
@@ -1521,28 +1611,7 @@ function HistoryScreen({ me, visible, onOpen }) {
       <PageHeader title="Historique" subtitle={`${filtered.length} intervention${filtered.length > 1 ? "s" : ""}`}
         actions={canBill && <button className="m-btn" disabled={!filtered.length} onClick={exportCsv}>Exporter CSV</button>} />
       <div className="p-4 md:p-8">
-        <div className="flex flex-wrap gap-2 items-center" style={{ marginBottom: 10 }}>
-          {PERIODS.map(p => <button key={p.id} className={activePeriod && activePeriod.id === p.id ? "m-btn" : "m-btn-sec"} style={{ padding: "5px 12px" }} onClick={() => { const [f, t] = periodRange(p.id); setFrom(f); setTo(t); }}>{p.label}</button>)}
-          <div className="flex items-center gap-1" style={{ fontSize: 13, color: "var(--muted)" }}>
-            du <input type="date" className="m-input" style={{ width: 150, padding: "5px 8px" }} value={from} max={to || undefined} onChange={e => setFrom(e.target.value)} />
-            au <input type="date" className="m-input" style={{ width: 150, padding: "5px 8px" }} value={to} min={from || undefined} onChange={e => setTo(e.target.value)} />
-          </div>
-          {hasFilters && <button style={{ border: 0, background: "none", color: "#0073ea", fontSize: 14 }} onClick={reset}>Effacer les filtres</button>}
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2" style={{ marginBottom: 16 }}>
-          <MultiSelect label="sociétés" allLabel="Toutes les sociétés" options={companyOptions} value={selCompanies} onChange={v => { setSelCompanies(v); setSelAddresses([]); }} />
-          <MultiSelect label="adresses" allLabel="Toutes les adresses" options={addressOptions} value={selAddresses} onChange={setSelAddresses} />
-          <select className="m-input" value={status} onChange={e => setStatus(e.target.value)}>
-            <option value="">Tous les statuts</option>
-            {STATUSES.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
-            {me.role !== "tech" && <option value="pending">En validation</option>}
-            {me.role !== "tech" && <option value="rejected">Refusées</option>}
-          </select>
-          <div style={{ position: "relative" }}>
-            <span style={{ position: "absolute", left: 10, top: 10, color: "var(--muted)" }}><Icon name="search" size={18} /></span>
-            <input className="m-input" style={{ paddingLeft: 34 }} placeholder="Rechercher" value={q} onChange={e => setQ(e.target.value)} />
-          </div>
-        </div>
+        <FilterBar f={filters} setF={setFilters} me={me} />
 
         {canBill && recap.length > 0 && (
           <div className="m-card" style={{ marginBottom: 20, overflow: "hidden" }}>
@@ -1554,7 +1623,7 @@ function HistoryScreen({ me, visible, onOpen }) {
                 <thead><tr><th>Société</th><th>Interventions</th><th>Terminées</th><th>Adresses</th><th>Durée totale</th></tr></thead>
                 <tbody>
                   {recap.map(r => (
-                    <tr key={r.key} style={{ cursor: "pointer" }} onClick={() => { setSelCompanies([r.key]); setSelAddresses([]); setGroupBy("address"); }}>
+                    <tr key={r.key} style={{ cursor: "pointer" }} onClick={() => { setFilters(p => ({ ...p, companies: [r.key], addresses: [] })); setGroupBy("address"); }}>
                       <td className="m-name" style={{ fontWeight: 500, color: r.key === NO_COMPANY ? "var(--muted)" : "inherit" }}>{r.name}</td>
                       <td>{r.n}</td><td>{r.done}</td><td>{r.addresses.size}</td><td>{fmtMinutes(r.minutes)}</td>
                     </tr>
@@ -1578,8 +1647,9 @@ function HistoryScreen({ me, visible, onOpen }) {
 
 /* Societes : une adresse appartient a une seule societe */
 function CompaniesSettings({ notify }) {
-  const { companies, saveCompanies, companyOf } = useData();
+  const { companies, saveCompanies, companyOf, extraAddresses, saveAddresses } = useData();
   const addresses = useAllAddresses();
+  const [newAddr, setNewAddr] = useState("");
   const [edit, setEdit] = useState(null);
   const [q, setQ] = useState("");
   const [onlyFree, setOnlyFree] = useState(false);
@@ -1592,6 +1662,17 @@ function CompaniesSettings({ notify }) {
   const toggle = a => setEdit(e => ({ ...e, addresses: has(a) ? e.addresses.filter(x => norm(x) !== norm(a)) : [...e.addresses, a] }));
   const shown = edit ? addresses.filter(a => (!q || norm(a).includes(norm(q))) && (!onlyFree || !companyOf(a) || has(a))) : [];
 
+  async function addAddress() {
+    const a = newAddr.trim().replace(/\s+/g, " ");
+    if (!a) return;
+    const existing = addresses.find(x => norm(x) === norm(a));
+    try {
+      if (!existing) await saveAddresses([...extraAddresses, a]);
+      const label = existing || a;
+      setEdit(e => (e.addresses.some(x => norm(x) === norm(label)) ? e : { ...e, addresses: [...e.addresses, label] }));
+      setNewAddr(""); notify(existing ? "Adresse existante cochée" : "Adresse ajoutée et cochée");
+    } catch (e) { notify("Erreur : " + e.message, true); }
+  }
   async function submit() {
     const name = edit.name.trim();
     if (!name) return notify("Donnez un nom à la société", true);
@@ -1646,6 +1727,10 @@ function CompaniesSettings({ notify }) {
             <label className="flex items-center gap-2" style={{ fontSize: 13 }}><input type="checkbox" checked={onlyFree} onChange={e => setOnlyFree(e.target.checked)} /> Seulement sans société</label>
           </div>
           <input className="m-input" placeholder="Filtrer les adresses (ex. 75016, rue Saint)" value={q} onChange={e => setQ(e.target.value)} />
+          <div className="flex gap-2" style={{ marginTop: 6 }}>
+            <input className="m-input" placeholder="Adresse absente de la liste ? Saisissez-la ici" value={newAddr} onChange={e => setNewAddr(e.target.value)} onKeyDown={e => { if (e.key === "Enter") addAddress(); }} />
+            <button className="m-btn-sec" style={{ whiteSpace: "nowrap" }} disabled={!newAddr.trim()} onClick={addAddress}>Ajouter</button>
+          </div>
           <div className="flex gap-3" style={{ margin: "6px 0", fontSize: 13 }}>
             <button style={{ border: 0, background: "none", color: "#0073ea", padding: 0 }} onClick={() => setEdit(e => ({ ...e, addresses: [...e.addresses, ...shown.filter(a => !has(a))] }))}>Cocher les {shown.length} affichées</button>
             <button style={{ border: 0, background: "none", color: "#0073ea", padding: 0 }} onClick={() => { const off = new Set(shown.map(norm)); setEdit(e => ({ ...e, addresses: e.addresses.filter(a => !off.has(norm(a))) })); }}>Décocher les affichées</button>
@@ -1673,6 +1758,70 @@ function CompaniesSettings({ notify }) {
           <p style={{ fontSize: 14 }}>Ses adresses repasseront « sans société ». Les interventions ne sont pas touchées.</p>
         </Modal>
       )}
+    </div>
+  );
+}
+
+/* Reglages > Adresses d intervention : ajout (une par ligne) et suppression des adresses ajoutees */
+function AddressesSettings({ notify }) {
+  const { extraAddresses, saveAddresses, companyOf, missions } = useData();
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [showBase, setShowBase] = useState(false);
+  const base = BUILDINGS_LIST.filter(b => b !== "CUSTOM");
+  const row = (a, removable) => {
+    const c = companyOf(a); const n = missions.filter(m => norm(m.location) === norm(a)).length;
+    return (
+      <div key={a} className="flex items-center gap-3" style={{ padding: "8px 14px", borderBottom: "1px solid var(--border-soft)", fontSize: 14 }}>
+        <span style={{ flex: 1, minWidth: 0 }}>{a}</span>
+        <span style={{ fontSize: 12, color: c ? "inherit" : "var(--muted)" }}>{c ? c.name : "sans société"}</span>
+        <span style={{ fontSize: 12, color: "var(--muted)", minWidth: 70, textAlign: "right" }}>{n} interv.</span>
+        {removable && <button title="Supprimer cette adresse" style={{ border: 0, background: "none", color: "var(--stuck)" }} onClick={() => remove(a, n)}><Icon name="trash" size={16} /></button>}
+      </div>
+    );
+  };
+  async function add() {
+    const lines = text.split(/\n|;/).map(x => x.trim().replace(/\s+/g, " ")).filter(Boolean);
+    if (!lines.length) return;
+    const known = new Set(placeList().map(norm)); const fresh = []; let dup = 0;
+    lines.forEach(l => { const k = norm(l); if (known.has(k)) dup++; else { known.add(k); fresh.push(l); } });
+    if (!fresh.length) return notify("Ces adresses existent déjà", true);
+    setBusy(true);
+    try { await saveAddresses([...extraAddresses, ...fresh]); setText(""); notify(`${fresh.length} adresse${fresh.length > 1 ? "s" : ""} ajoutée${fresh.length > 1 ? "s" : ""}${dup ? ` (${dup} déjà existante${dup > 1 ? "s" : ""})` : ""}`); }
+    catch (e) { notify("Erreur : " + e.message, true); }
+    setBusy(false);
+  }
+  async function remove(a, n) {
+    if (!window.confirm(`Supprimer « ${a} » de la liste ?${n ? `\n${n} intervention(s) gardent cette adresse.` : ""}`)) return;
+    try { await saveAddresses(extraAddresses.filter(x => x !== a)); notify("Adresse supprimée de la liste"); } catch (e) { notify("Erreur : " + e.message, true); }
+  }
+  return (
+    <div>
+      <h2 className="group-title" style={{ color: "#579bfc", margin: "0 0 8px" }}>Adresses d’intervention</h2>
+      <div className="m-card" style={{ padding: 16 }}>
+        <label className="m-label" style={{ marginTop: 0 }}>Ajouter des adresses (une par ligne)</label>
+        <textarea className="m-input" rows={3} value={text} onChange={e => setText(e.target.value)} placeholder={"12 rue Exemple 75001 Paris\n8 avenue Test 69003 Lyon"} />
+        <div className="flex items-center gap-3 flex-wrap" style={{ marginTop: 8 }}>
+          <button className="m-btn" disabled={busy || !text.trim()} onClick={add}>Ajouter</button>
+          <span style={{ fontSize: 12, color: "var(--muted)" }}>Elles apparaissent aussitôt dans les interventions, les filtres, les sociétés et l’import Monday.</span>
+        </div>
+      </div>
+      <div className="m-card" style={{ marginTop: 10 }}>
+        <div style={{ padding: "10px 14px", borderBottom: "1px solid var(--border-soft)", fontWeight: 600 }}>Mes adresses ajoutées ({extraAddresses.length})</div>
+        {!extraAddresses.length && <div style={{ padding: 14, color: "var(--muted)", fontSize: 14 }}>Aucune pour l’instant.</div>}
+        {extraAddresses.map(a => row(a, true))}
+        <button style={{ border: 0, background: "none", color: "#0073ea", padding: "10px 14px", fontSize: 14 }} onClick={() => setShowBase(v => !v)}>{showBase ? "Masquer" : "Voir"} les {base.length} adresses d’origine</button>
+        {showBase && base.map(a => row(a, false))}
+      </div>
+    </div>
+  );
+}
+
+function CompaniesScreen({ notify }) {
+  return (
+    <div>
+      <PageHeader title="Sociétés" subtitle="Regroupez les adresses par société : filtres et facturation" />
+      <div className="p-4 md:p-8"><CompaniesSettings notify={notify} /></div>
     </div>
   );
 }
@@ -1734,6 +1883,8 @@ function SettingsScreen({ me, notify }) {
   }
   async function restoreMission(m) {
     const { deletedAt, deletedBy, ...rest } = m;
+    // Supprimee par la synchro Monday : la restaurer la detache de Monday, sinon elle repartirait a la corbeille
+    if (deletedBy === "monday") { delete rest.mondayId; delete rest.mondayUpdatedAt; }
     try { await save(rest, m.date); notify("Intervention restaurée"); } catch (e) { notify(e.message, true); }
   }
   async function resetHostaway() {
@@ -1745,9 +1896,9 @@ function SettingsScreen({ me, notify }) {
 
   return (
     <div>
-      <PageHeader title="Réglages" subtitle="Utilisateurs, sociétés, corbeille et Hostaway" />
+      <PageHeader title="Réglages" subtitle="Adresses, utilisateurs, corbeille et Hostaway" />
       <div className="p-4 md:p-8 flex flex-col gap-6">
-        <CompaniesSettings notify={notify} />
+        <AddressesSettings notify={notify} />
         <div>
           <div className="flex items-center justify-between flex-wrap gap-2" style={{ marginBottom: 8 }}>
             <h2 className="group-title" style={{ color: "#0073ea", margin: 0 }}>Utilisateurs</h2>
@@ -1880,6 +2031,7 @@ const TABS = [
   { id: "planning", label: "Planning", icon: "calendar" },
   { id: "kanban", label: "Tableau", icon: "kanban" },
   { id: "history", label: "Historique", icon: "history" },
+  { id: "companies", label: "Sociétés", icon: "building" },
   { id: "settings", label: "Réglages", icon: "settings" }
 ];
 const Logo = ({ h = 18 }) => <div className="flex gap-0.5">{["#df2f4a", "#fdab3d", "#00c875"].map(c => <span key={c} style={{ width: h * 0.4, height: h, borderRadius: 4, background: c, display: "inline-block", transform: "rotate(20deg)" }} />)}</div>;
@@ -1888,6 +2040,7 @@ function Shell() {
   const data = useData();
   const [session, setSession] = useState(() => { try { return JSON.parse(localStorage.getItem(SESSION_KEY) || "null"); } catch (e) { return null; } });
   const [tab, setTab] = useState("home");
+  const [filters, setFilters] = useState(EMPTY_FILTERS);
   const [modal, setModal] = useState(null);
   const [toast, setToast] = useState(null);
   const notify = useCallback((text, error) => { setToast({ text, error }); clearTimeout(window.__t); window.__t = setTimeout(() => setToast(null), 3200); }, []);
@@ -1899,7 +2052,7 @@ function Shell() {
   }, [session, data.users, data.usersLoaded]);
 
   const login = u => { const s = { id: u.id, username: u.username, role: u.role, ts: Date.now() }; try { localStorage.setItem(SESSION_KEY, JSON.stringify(s)); } catch (e) { } setSession(s); setTab("home"); };
-  const logout = () => { try { localStorage.removeItem(SESSION_KEY); } catch (e) { } setSession(null); };
+  const logout = () => { try { localStorage.removeItem(SESSION_KEY); } catch (e) { } setSession(null); setFilters(EMPTY_FILTERS); };
 
   useMondayAutoSync(me, notify);
 
@@ -1908,8 +2061,8 @@ function Shell() {
   // Admin et manager voient tout ; le technicien voit seulement ses interventions validees
   const visible = data.missions.filter(m => me.role === "tech" ? (m.assignedTo === me.id && isApproved(m)) : true);
   const pendingCount = isStrictAdmin(me) ? data.missions.filter(m => m.approved === false).length : 0;
-  const tabs = TABS.filter(t => t.id !== "settings" || canSettings(me));
-  const props = { me, visible, onOpen: m => setModal({ ...m }), onNew: init => setModal({ ...init }), notify };
+  const tabs = TABS.filter(t => (t.id !== "settings" || canSettings(me)) && (t.id !== "companies" || me.role !== "tech"));
+  const props = { me, visible, onOpen: m => setModal({ ...m }), onNew: init => setModal({ ...init }), notify, filters, setFilters };
 
   return (
     <div style={{ minHeight: "100vh" }}>
@@ -1933,6 +2086,7 @@ function Shell() {
         {tab === "planning" && <PlanningScreen {...props} />}
         {tab === "kanban" && <KanbanScreen {...props} />}
         {tab === "history" && <HistoryScreen {...props} />}
+        {tab === "companies" && me.role !== "tech" && <CompaniesScreen {...props} />}
         {tab === "settings" && canSettings(me) && <SettingsScreen {...props} />}
       </main>
 
