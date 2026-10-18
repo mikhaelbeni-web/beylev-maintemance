@@ -1,12 +1,13 @@
 // Import de taches Hostaway - proxy securise
-// La cle API reste ici, jamais exposee au frontend
-const HOSTAWAY_ACCOUNT_ID = "148614";
-const HOSTAWAY_API_KEY = "038ea2e96cb0da25459f265ed2bf4b4346e1c3852fcd6976c99cf120010154f7";
+// Le secret est lu dans les variables d environnement Vercel, jamais expose au frontend
+const HOSTAWAY_ACCOUNT_ID = process.env.HOSTAWAY_ACCOUNT_ID || "148614";
+const HOSTAWAY_API_KEY = process.env.HOSTAWAY_CLIENT_SECRET;
 
 let cachedToken = null;
 let tokenExpiry = 0;
 
 async function getToken() {
+  if (!HOSTAWAY_API_KEY) throw Object.assign(new Error("HOSTAWAY_CLIENT_SECRET manquante dans les variables Vercel"), { status: 500 });
   if (cachedToken && Date.now() < tokenExpiry) return cachedToken;
   const r = await fetch("https://api.hostaway.com/v1/accessTokens", {
     method: "POST",
@@ -18,7 +19,7 @@ async function getToken() {
       scope: "general",
     }),
   });
-  if (!r.ok) throw new Error("Authentification Hostaway echouee - HTTP " + r.status);
+  if (!r.ok) throw Object.assign(new Error("Authentification Hostaway echouee - HTTP " + r.status), { status: r.status });
   const data = await r.json();
   cachedToken = data.access_token;
   tokenExpiry = Date.now() + (data.expires_in ? data.expires_in * 1000 - 60000 : 15 * 60000);
@@ -29,7 +30,7 @@ async function hostawayGet(path, token) {
   const r = await fetch("https://api.hostaway.com/v1" + path, {
     headers: { Authorization: "Bearer " + token, "Cache-control": "no-cache" },
   });
-  if (!r.ok) throw new Error("Hostaway " + path + " -> HTTP " + r.status);
+  if (!r.ok) throw Object.assign(new Error("Hostaway " + path + " -> HTTP " + r.status), { status: r.status });
   return r.json();
 }
 
@@ -122,6 +123,6 @@ module.exports = async (req, res) => {
     if (debug) payload.raw = { rawTasks, allRawTasks, listings };
     res.status(200).json(payload);
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    res.status(e.status === 403 ? 403 : 500).json({ error: e.message });
   }
 };

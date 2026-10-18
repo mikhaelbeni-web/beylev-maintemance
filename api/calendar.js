@@ -31,7 +31,7 @@ module.exports = async (req, res) => {
         const monthData=JSON.parse(data.fields.v.stringValue);
         Object.values(monthData).flat().forEach(m=>{
           if(m.approved===false||m.approved==='rejected')return;
-          if(m.status==='cancelled')return;
+          if(m.status==='cancelled'||m.deletedAt)return;
           if(userId&&m.assignedTo!==userId)return;
           allMissions.push(m);
         });
