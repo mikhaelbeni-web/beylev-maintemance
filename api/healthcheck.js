@@ -2,7 +2,7 @@
 // Verifie Firestore + Resend + integrite utilisateurs + backup quotidien
 // Envoie alerte email UNIQUEMENT si probleme detecte
 
-const RESEND_API_KEY = "re_JZgydhox_8XtWDrfwRFAQDcjWwxAXXz5g";
+const RESEND_API_KEY = process.env.RESEND_API_KEY;
 const FROM_EMAIL     = "gestion@beylev.com";
 const ALERT_EMAIL    = "gestion@beylev.com";
 const PROJECT_ID     = "planning-maintenance-9a3c4";
