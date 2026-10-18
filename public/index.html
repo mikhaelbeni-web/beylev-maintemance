@@ -101,6 +101,9 @@ const HOSTAWAY_NOTIFS_KEY = "hostaway_notifications";
 /* Societes : [{ id, name, addresses: ["adresse exacte du champ location"] }]. Les missions ne sont pas modifiees. */
 const COMPANIES_KEY = "lv_companies_v1";
 const NO_COMPANY = "__none__";
+/* Monday : { boardId, boardName, map: { champ app: id colonne }, auto, defaultTech } et ids deja traites */
+const MONDAY_CONFIG_KEY = "monday_config";
+const MONDAY_IDS_KEY = "monday_handled_ids";
 const SESSION_KEY = "beylev_session_v2";
 const GESTION_EMAIL = "gestion@beylev.com";
 const TRASH_DAYS = 30;
@@ -228,6 +231,24 @@ async function writeMission(mission, previousDate) {
     if (oldRef) tx.set(oldRef, { v: JSON.stringify(withoutId(st.parse(oldSnap), m.id)) });
   });
 }
+/* Import groupe : une transaction par mois, ignore un element Monday deja present (deux appareils en meme temps) */
+async function importMissions(list) {
+  const byMonth = {};
+  list.forEach(m => { const k = monthKeyOf(m.date); (byMonth[k] = byMonth[k] || []).push(clean(m)); });
+  let added = 0;
+  for (const [k, items] of Object.entries(byMonth)) {
+    const ref = st.ref(k);
+    await db.runTransaction(async tx => {
+      const obj = normMonth(st.parse(await tx.get(ref)));
+      const known = new Set(Object.values(obj).flat().map(x => x && x.mondayId).filter(Boolean));
+      let n = 0;
+      items.forEach(m => { if (m.mondayId && known.has(m.mondayId)) return; (obj[m.date] = obj[m.date] || []).push(m); n++; });
+      tx.set(ref, { v: JSON.stringify(obj) });
+      added += n;
+    });
+  }
+  return added;
+}
 async function removeMissionHard(mission) {
   const ref = st.ref(monthKeyOf(mission.date));
   await db.runTransaction(async tx => {
@@ -327,6 +348,8 @@ function DataProvider({ children }) {
   const idsDoc = useDocValue(HOSTAWAY_IDS_KEY, []);
   const notifsDoc = useDocValue(HOSTAWAY_NOTIFS_KEY, []);
   const companiesDoc = useDocValue(COMPANIES_KEY, []);
+  const mondayCfgDoc = useDocValue(MONDAY_CONFIG_KEY, null);
+  const mondayIdsDoc = useDocValue(MONDAY_IDS_KEY, []);
   const live = useLiveMissions();
   const [extra, setExtra] = useState({});
 
@@ -362,6 +385,11 @@ function DataProvider({ children }) {
   const value = {
     companies, companyOf: loc => companyByAddress[norm(loc)] || null,
     saveCompanies: c => st.set(COMPANIES_KEY, clean(c)),
+    mondayConfig: mondayCfgDoc.value, mondayLoaded: mondayCfgDoc.loaded && mondayIdsDoc.loaded,
+    mondayIds: Array.isArray(mondayIdsDoc.value) ? mondayIdsDoc.value.map(String) : [],
+    saveMondayConfig: c => st.set(MONDAY_CONFIG_KEY, clean(c)),
+    saveMondayIds: ids => st.set(MONDAY_IDS_KEY, ids),
+    importMissions: async list => { const n = await importMissions(list); await fetchMonths([...new Set(list.map(m => monthKeyOf(m.date)))]); return n; },
     users, usersLoaded: usersDoc.loaded, usersTrash: Array.isArray(trashDoc.value) ? trashDoc.value : [],
     hostawayIds: Array.isArray(idsDoc.value) ? idsDoc.value.map(String) : [],
     hostawayNotifs: Array.isArray(notifsDoc.value) ? notifsDoc.value : [],
@@ -767,6 +795,7 @@ function MissionTable({ groups, me, onOpen, emptyText }) {
 function HomeScreen({ me, visible, onOpen, onNew, notify }) {
   const { missions, hostawayNotifs, saveHostawayNotifs } = useData();
   const [showImport, setShowImport] = useState(false);
+  const [showMonday, setShowMonday] = useState(false);
   const today = todayStr();
   const active = visible.filter(m => m.approved !== "rejected");
   const todays = active.filter(m => coversDay(m, today)).sort((a, b) => (a.time || "").localeCompare(b.time || ""));
@@ -794,6 +823,7 @@ function HomeScreen({ me, visible, onOpen, onNew, notify }) {
       <PageHeader title={`Bonjour ${String(me.name).split(" ")[0]} 👋`} subtitle={fmtDateLong(today)}
         actions={<>
           {me.role === "manager" && <button className="m-btn-sec" onClick={() => setShowImport(true)}><span className="inline-flex items-center gap-1"><Icon name="download" size={16} /> Import Hostaway</span></button>}
+          {me.role !== "tech" && <button className="m-btn-sec" onClick={() => setShowMonday(true)}><span className="inline-flex items-center gap-1"><Icon name="download" size={16} /> Import Monday</span></button>}
           {me.role !== "tech" && <button className="m-btn" onClick={() => onNew({})}><span className="inline-flex items-center gap-1"><Icon name="plus" size={16} /> Nouvelle intervention</span></button>}
         </>} />
       <div className="p-4 md:p-8 flex flex-col gap-6">
@@ -837,6 +867,7 @@ function HomeScreen({ me, visible, onOpen, onNew, notify }) {
           ]} />
       </div>
       {showImport && <HostawayImport me={me} onClose={() => setShowImport(false)} notify={notify} />}
+      {showMonday && <MondayImport me={me} onClose={() => setShowMonday(false)} notify={notify} />}
     </div>
   );
 }
@@ -971,6 +1002,199 @@ function HostawayImport({ me, onClose, notify }) {
 }
 
 /* ===================== PLANNING ===================== */
+/* ===================== MONDAY ===================== */
+const MONDAY_FIELDS = [
+  { id: "title", label: "Intervention", hint: "nom de l’élément par défaut", keys: [] },
+  { id: "location", label: "Adresse", keys: ["adresse", "lieu", "address", "location", "bien", "appartement", "immeuble"] },
+  { id: "date", label: "Date", keys: ["date", "echeance", "jour", "timeline", "chronologie", "planning", "due"] },
+  { id: "status", label: "Statut", keys: ["statut", "status", "etat"] },
+  { id: "assignee", label: "Technicien", keys: ["technicien", "personne", "assigne", "responsable", "owner", "people", "intervenant"] },
+  { id: "description", label: "Description", keys: ["description", "notes", "note", "detail", "commentaire", "probleme"] },
+  { id: "duration", label: "Durée (minutes)", keys: ["duree", "duration", "temps", "minutes"] }
+];
+const NAME_COL = "__name__";
+const fetchJson = url => fetch(url).then(r => r.json().then(j => { if (!r.ok) throw new Error(j.error || "HTTP " + r.status); return j; }));
+function guessMapping(columns) {
+  const map = { title: NAME_COL };
+  MONDAY_FIELDS.forEach(f => {
+    if (f.id === "title") return;
+    const c = columns.find(c => f.keys.some(k => norm(c.title).includes(k)) && c.type !== "subtasks");
+    if (c) map[f.id] = c.id;
+  });
+  return map;
+}
+function mondayStatus(text) {
+  const t = norm(text);
+  if (/termin|done|fait|fini|clos|realis/.test(t)) return "done";
+  if (/cours|working|progress|demarr/.test(t)) return "inprogress";
+  if (/annul|cancel/.test(t)) return "cancelled";
+  return "todo";
+}
+/* Transforme un element Monday en intervention. Une date absente prend la date de creation de l element. */
+function mondayToMission(item, map, users, defaultTech, me) {
+  const val = k => (map[k] === NAME_COL ? item.name : map[k] ? (item.values[map[k]] || "") : "").trim();
+  const dates = val("date").match(/\d{4}-\d{2}-\d{2}/g) || [];
+  const time = (val("date").match(/\b(\d{1,2}):(\d{2})\b/) || []).slice(1);
+  const created = item.createdAt ? ymd(new Date(item.createdAt)) : todayStr();
+  const who = val("assignee").split(",").map(norm).filter(Boolean)[0];
+  const tech = who && (users.find(u => norm(u.name) === who) || users.find(u => norm(u.name).includes(who) || who.includes(norm(u.name).split(" ")[0])));
+  const loc = val("location");
+  const m = {
+    id: uid(), mondayId: item.id, title: val("title") || item.name || "Élément Monday",
+    location: matchBuilding(loc) || loc, description: val("description"),
+    date: dates[0] || created, status: mondayStatus(val("status")), assignedTo: (tech || {}).id || defaultTech,
+    priority: "normal", duration: parseInt(val("duration"), 10) || 0, approved: true,
+    createdBy: me.id, createdAt: new Date().toISOString(), photos: [], comments: []
+  };
+  if (dates[1] && dates[1] > m.date) m.dateEnd = dates[1];
+  if (time.length) m.time = `${pad(time[0])}:${time[1]}`;
+  return { mission: m, noDate: !dates.length, noTech: !tech };
+}
+
+/* Synchro Monday -> app : les nouveaux elements du tableau sont importes a l ouverture puis toutes les 10 minutes */
+function useMondayAutoSync(me, notify) {
+  const { mondayConfig, mondayLoaded, mondayIds, saveMondayIds, missions, users, importMissions } = useData();
+  const latest = useRef({}); latest.current = { mondayIds, missions, users };
+  const running = useRef(false);
+  const enabled = !!(me && me.role !== "tech" && mondayLoaded && mondayConfig && mondayConfig.auto && mondayConfig.boardId);
+  useEffect(() => {
+    if (!enabled) return;
+    const run = async () => {
+      if (running.current) return; running.current = true;
+      try {
+        const { items } = await fetchJson(`/api/monday?action=items&board=${mondayConfig.boardId}`);
+        const { mondayIds, missions, users } = latest.current;
+        const known = new Set([...mondayIds, ...missions.map(m => m.mondayId).filter(Boolean)]);
+        const fresh = items.filter(it => !known.has(it.id));
+        if (!fresh.length) return;
+        const list = fresh.map(it => mondayToMission(it, mondayConfig.map || {}, users, mondayConfig.defaultTech, me).mission);
+        const n = await importMissions(list);
+        await saveMondayIds([...new Set([...mondayIds, ...fresh.map(it => it.id)])]);
+        if (n) notify(`${n} élément${n > 1 ? "s" : ""} Monday importé${n > 1 ? "s" : ""}`);
+      } catch (e) { console.warn("Synchro Monday", e); }
+      finally { running.current = false; }
+    };
+    run();
+    const t = setInterval(run, 10 * 60000);
+    return () => clearInterval(t);
+  }, [enabled, JSON.stringify(mondayConfig)]);
+}
+
+function MondayImport({ me, onClose, notify }) {
+  const { users, missions, mondayConfig, mondayIds, saveMondayConfig, saveMondayIds, importMissions } = useData();
+  const techs = users.filter(u => u.role === "tech");
+  const cfg = mondayConfig || {};
+  const [boards, setBoards] = useState(null);
+  const [boardId, setBoardId] = useState(cfg.boardId || "");
+  const [data, setData] = useState(null);
+  const [map, setMap] = useState(cfg.map || null);
+  const [defaultTech, setDefaultTech] = useState(cfg.defaultTech || (techs[0] || users[0] || {}).id);
+  const [auto, setAuto] = useState(cfg.auto !== false);
+  const [hideDone, setHideDone] = useState(false);
+  const [excluded, setExcluded] = useState({});
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => { fetchJson("/api/monday?action=boards").then(j => setBoards(j.boards)).catch(e => setError(e.message)); }, []);
+  useEffect(() => {
+    if (!boardId) return;
+    setData(null); setError("");
+    fetchJson(`/api/monday?action=items&board=${boardId}`).then(j => {
+      setData(j);
+      if (!map || boardId !== cfg.boardId) setMap(guessMapping(j.board.columns));
+    }).catch(e => setError(e.message));
+  }, [boardId]);
+
+  const known = new Set([...mondayIds, ...missions.map(m => m.mondayId).filter(Boolean)]);
+  const rows = data && map ? data.items.filter(it => !known.has(it.id)).map(it => ({ item: it, ...mondayToMission(it, map, users, defaultTech, me) })) : [];
+  const shown = rows.filter(r => !hideDone || r.mission.status !== "done");
+  const selected = shown.filter(r => !excluded[r.item.id]);
+  const already = data ? data.items.length - rows.length : 0;
+
+  async function submit() {
+    setBusy(true);
+    try {
+      const n = selected.length ? await importMissions(selected.map(r => r.mission)) : 0;
+      // Les elements decoches ou masques sont marques ignores : la synchro auto ne les reprendra pas
+      await saveMondayIds([...new Set([...mondayIds, ...rows.map(r => r.item.id)])]);
+      await saveMondayConfig({ boardId, boardName: data.board.name, map, defaultTech, auto, updatedAt: new Date().toISOString(), updatedBy: me.id });
+      notify(n ? `${n} intervention${n > 1 ? "s" : ""} importée${n > 1 ? "s" : ""} depuis Monday` : "Réglages Monday enregistrés");
+      onClose();
+    } catch (e) { notify("Erreur : " + e.message, true); }
+    setBusy(false);
+  }
+  const colOptions = data ? data.board.columns.filter(c => c.id !== "name") : [];
+  const userName = id => (users.find(u => u.id === id) || {}).name || "—";
+
+  return (
+    <Modal wide onClose={onClose} title="Import Monday"
+      footer={<>
+        <button className="m-btn-sec" onClick={onClose}>Annuler</button>
+        <button className="m-btn" disabled={busy || !data || !map} onClick={submit}>{selected.length ? `Importer ${selected.length} intervention${selected.length > 1 ? "s" : ""}` : "Enregistrer les réglages"}</button>
+      </>}>
+      <p style={{ color: "var(--muted)", fontSize: 14, marginTop: 0 }}>L’app lit votre tableau Monday sans jamais le modifier. Choisissez le tableau, vérifiez quelle colonne correspond à quoi, puis importez. Un élément déjà importé ne revient jamais.</p>
+      {error && <div style={{ background: "#ffebee", color: "#b00020", padding: 12, borderRadius: 6, marginBottom: 12, fontSize: 14 }}>{error}{/MONDAY_API_TOKEN/.test(error) && <div style={{ marginTop: 4 }}>Ajoutez le jeton Monday dans Vercel (Settings &gt; Environment Variables) puis redéployez.</div>}</div>}
+      <label className="m-label" style={{ marginTop: 0 }}>Tableau Monday</label>
+      <select className="m-input" value={boardId} onChange={e => { setBoardId(e.target.value); setExcluded({}); }}>
+        <option value="">{boards ? "Choisir un tableau…" : "Chargement des tableaux…"}</option>
+        {(boards || []).map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+        {!boards && cfg.boardId && <option value={cfg.boardId}>{cfg.boardName || cfg.boardId}</option>}
+      </select>
+
+      {boardId && !data && !error && <div style={{ padding: 20, textAlign: "center", color: "var(--muted)" }}>Lecture du tableau…</div>}
+      {data && map && (<>
+        <div style={{ fontWeight: 600, margin: "16px 0 4px" }}>Correspondance des colonnes</div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-3">
+          {MONDAY_FIELDS.map(f => (
+            <div key={f.id}>
+              <label className="m-label">{f.label}</label>
+              <select className="m-input" value={map[f.id] || ""} onChange={e => setMap(m => ({ ...m, [f.id]: e.target.value }))}>
+                <option value="">— Aucune —</option>
+                <option value={NAME_COL}>Nom de l’élément</option>
+                {colOptions.map(c => <option key={c.id} value={c.id}>{c.title}</option>)}
+              </select>
+            </div>
+          ))}
+          <div>
+            <label className="m-label">Technicien si non reconnu</label>
+            <select className="m-input" value={defaultTech} onChange={e => setDefaultTech(e.target.value)}>{users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}</select>
+          </div>
+        </div>
+        <label className="flex items-start gap-2" style={{ marginTop: 14, fontSize: 14, background: "#e5f4ff", padding: 10, borderRadius: 6 }}>
+          <input type="checkbox" checked={auto} onChange={e => setAuto(e.target.checked)} style={{ marginTop: 3 }} />
+          <span><b>Importer automatiquement les nouveaux éléments</b><br /><span style={{ color: "var(--muted)" }}>Chaque élément créé ensuite dans ce tableau arrive tout seul dans l’app (vérification à l’ouverture puis toutes les 10 minutes). Décochez quand l’équipe n’utilise plus Monday.</span></span>
+        </label>
+
+        <div className="flex items-center justify-between flex-wrap gap-2" style={{ margin: "16px 0 6px" }}>
+          <b>{rows.length} nouvel{rows.length > 1 ? "s" : ""} élément{rows.length > 1 ? "s" : ""}{already ? <span style={{ fontWeight: 400, color: "var(--muted)" }}> · {already} déjà importé{already > 1 ? "s" : ""} ou ignoré{already > 1 ? "s" : ""}</span> : null}</b>
+          <div className="flex items-center gap-3" style={{ fontSize: 13 }}>
+            <label className="flex items-center gap-1"><input type="checkbox" checked={hideDone} onChange={e => setHideDone(e.target.checked)} /> Masquer les terminés</label>
+            <button style={{ border: 0, background: "none", color: "#0073ea", padding: 0 }} onClick={() => setExcluded(Object.fromEntries(shown.map(r => [r.item.id, !selected.length ? false : true])))}>{selected.length ? "Tout décocher" : "Tout cocher"}</button>
+          </div>
+        </div>
+        <div style={{ border: "1px solid var(--border-soft)", borderRadius: 6, maxHeight: 360, overflowY: "auto" }}>
+          {shown.map(r => {
+            const m = r.mission; const off = !!excluded[r.item.id];
+            return (
+              <label key={r.item.id} className="flex items-start gap-2" style={{ padding: "8px 10px", fontSize: 13, cursor: "pointer", borderBottom: "1px solid var(--border-soft)", opacity: off ? 0.5 : 1 }}>
+                <input type="checkbox" checked={!off} onChange={() => setExcluded(x => ({ ...x, [r.item.id]: !off }))} style={{ marginTop: 3 }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div className="flex items-center gap-2 flex-wrap"><b style={{ fontSize: 14 }}>{m.title}</b><span className="m-pill" style={{ background: statusColor(m) }}>{statusText(m)}</span></div>
+                  <div style={{ color: "var(--muted)" }}>
+                    <span style={{ color: r.noDate ? "#d97706" : "inherit" }}>{fmtRange(m)}{r.noDate ? " (date de création)" : ""}</span>{m.time ? ` · ${m.time}` : ""} · {m.location || <span style={{ color: "#d97706" }}>sans adresse</span>} · <span style={{ color: r.noTech ? "#d97706" : "inherit" }}>{userName(m.assignedTo)}</span>
+                  </div>
+                </div>
+              </label>
+            );
+          })}
+          {!shown.length && <div style={{ padding: 16, textAlign: "center", color: "var(--muted)", fontSize: 14 }}>Rien de nouveau dans ce tableau.</div>}
+        </div>
+        <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 6 }}>En orange : valeur devinée (date de création, technicien par défaut) ou manquante. Les éléments décochés ou masqués seront ignorés définitivement. Les interventions importées sont déjà validées et restent modifiables dans l’app.</div>
+      </>)}
+    </Modal>
+  );
+}
+
 function PlanningScreen({ me, visible, onOpen, onNew }) {
   const { fetchMonths } = useData();
   const [view, setView] = useState("month");
@@ -1652,6 +1876,8 @@ function Shell() {
 
   const login = u => { const s = { id: u.id, username: u.username, role: u.role, ts: Date.now() }; try { localStorage.setItem(SESSION_KEY, JSON.stringify(s)); } catch (e) { } setSession(s); setTab("home"); };
   const logout = () => { try { localStorage.removeItem(SESSION_KEY); } catch (e) { } setSession(null); };
+
+  useMondayAutoSync(me, notify);
 
   if (!me) return <LoginScreen onLogin={login} />;
 
