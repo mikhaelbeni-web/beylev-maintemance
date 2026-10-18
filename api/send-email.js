@@ -1,5 +1,7 @@
 // Proxy Resend. La cle est lue dans la variable d environnement RESEND_API_KEY.
 // Accepte { to, subject, html } ou l ancien format { to_email, to_name, subject, message, mission_* }.
+// Reserve aux utilisateurs connectes (jeton Firebase verifie), sinon n importe qui pourrait envoyer au nom de Beylev.
+const fb = require("./_lib/firebase");
 const FROM_EMAIL = process.env.EMAIL_FROM || "gestion@beylev.com";
 const MAX_RECIPIENTS = 10;
 
@@ -14,6 +16,7 @@ module.exports = async (req, res) => {
   if (!key) return res.status(500).json({ error: "RESEND_API_KEY manquante dans les variables Vercel" });
 
   try {
+    await fb.requireUser(req);
     const p = (typeof req.body === "string" ? JSON.parse(req.body) : req.body) || {};
     const rawTo = p.to !== undefined ? p.to : p.to_email;
     const to = (Array.isArray(rawTo) ? rawTo : [rawTo]).filter(x => typeof x === "string" && /.+@.+\..+/.test(x));
@@ -29,6 +32,6 @@ module.exports = async (req, res) => {
     const data = await r.json().catch(() => ({}));
     res.status(r.ok ? 200 : 400).json(data);
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    res.status(e.status || 500).json({ error: e.message });
   }
 };

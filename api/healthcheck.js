@@ -1,33 +1,16 @@
 // Healthcheck automatique - execute tous les jours a 8h (Cron Vercel)
-// Verifie Firestore + Resend + integrite utilisateurs + backup quotidien
+// Verifie Firestore + comptes Firebase Auth + Resend + integrite utilisateurs + backup quotidien
 // Envoie alerte email UNIQUEMENT si probleme detecte
 
+const fb = require("./_lib/firebase");
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
 const FROM_EMAIL     = "gestion@beylev.com";
 const ALERT_EMAIL    = "gestion@beylev.com";
-const PROJECT_ID     = "planning-maintenance-9a3c4";
-const API_KEY        = "AIzaSyB7i6PnqFAdBuGuFM84BKGYWwRT0P8GClc";
 const APP_URL        = "https://beylev-vercel.vercel.app";
 
-async function getDoc(docId) {
-  const url = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents/app_data/${docId}?key=${API_KEY}`;
-  const r = await fetch(url);
-  if (r.status === 403) throw new Error("REGLES FIRESTORE EXPIREES - republier sur console.firebase.google.com");
-  if (r.status === 404) return null;
-  if (!r.ok) throw new Error("Firestore HTTP " + r.status);
-  const data = await r.json();
-  if (!data.fields?.v?.stringValue) return null;
-  return JSON.parse(data.fields.v.stringValue);
-}
-
-async function setDoc(docId, obj) {
-  const url = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents/app_data/${docId}?key=${API_KEY}`;
-  await fetch(url, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ fields: { v: { stringValue: JSON.stringify(obj) } } })
-  });
-}
+// Lecture/ecriture via le compte de service : independant des regles Firestore publiees.
+const getDoc = fb.getDoc;
+const setDoc = fb.setDoc;
 
 async function checkFirestore() {
   const users = await getDoc("lv_users_v1");
@@ -44,7 +27,7 @@ async function checkUserIntegrity() {
     const u = users.find(x => x.username === req);
     if (!u) errors.push(`Compte "${req}" manquant`);
     else {
-      if (!u.password || u.password.trim() === "") errors.push(`Compte "${req}" a un mot de passe vide`);
+      if (!u.authUid && !u.password) errors.push(`Compte "${req}" sans compte Firebase ni ancien mot de passe : impossible de se connecter`);
       if (!u.name || u.name.trim() === "") errors.push(`Compte "${req}" a un nom vide`);
     }
   }
@@ -61,12 +44,25 @@ async function backupUsers() {
   const today = new Date().toISOString().slice(0, 10);
   const existingToday = backups.find(b => b.date === today);
   if (existingToday) return "Backup du jour deja fait";
-  backups.push({ date: today, users, createdAt: new Date().toISOString() });
+  // Jamais de mot de passe dans les sauvegardes.
+  backups.push({ date: today, users: users.map(({ password, ...u }) => u), createdAt: new Date().toISOString() });
   // Garde les 30 derniers backups
   const cutoff = Date.now() - 30 * 24 * 3600 * 1000;
   const recent = backups.filter(b => new Date(b.createdAt).getTime() > cutoff);
   await setDoc("users_backups", recent);
   return `Backup cree (${recent.length} backups conservés)`;
+}
+
+async function checkAuthAccounts() {
+  const users = await getDoc("lv_users_v1");
+  const linked = users.filter(u => u.authUid);
+  const problems = [];
+  for (const u of linked) {
+    try { const r = await fb.auth().getUser(u.authUid); if (r.disabled) problems.push(`Compte Firebase de "${u.username}" desactive`); }
+    catch (e) { problems.push(`Compte Firebase de "${u.username}" introuvable`); }
+  }
+  if (problems.length) throw new Error(problems.join(" | "));
+  return `${linked.length}/${users.length} utilisateur(s) relies a Firebase Auth`;
 }
 
 async function checkAppReachable() {
@@ -104,8 +100,8 @@ async function sendAlert(failures) {
       </table>
       <p style="margin-top:16px"><strong>Actions recommandees :</strong></p>
       <ul style="margin:8px 0 16px 20px;padding:0">
-        <li>Si "REGLES FIRESTORE EXPIREES" : console.firebase.google.com -> Firestore -> Regles -> republier</li>
-        <li>Si "Compte manquant" ou "mot de passe vide" : verifier dans Reglages, restaurer depuis la corbeille si besoin</li>
+        <li>Si "FIREBASE_SERVICE_ACCOUNT manquante" : Vercel -> Settings -> Environment Variables</li>
+        <li>Si "Compte manquant" ou "impossible de se connecter" : definir un mot de passe dans Reglages, restaurer depuis la corbeille si besoin</li>
         <li>Si "AUCUN administrateur" : URGENT - restaurer un compte admin depuis la corbeille</li>
         <li>Si "Resend" : verifier resend.com</li>
       </ul>
@@ -127,12 +123,14 @@ async function sendAlert(failures) {
 }
 
 module.exports = async (req, res) => {
-  res.setHeader("Access-Control-Allow-Origin", "*");
+  // Si CRON_SECRET est defini dans Vercel, seul le cron Vercel (qui l envoie) peut declencher le diagnostic.
+  if (process.env.CRON_SECRET && req.headers.authorization !== `Bearer ${process.env.CRON_SECRET}`) return res.status(401).json({ error: "Non autorise" });
   const results = { checked_at: new Date().toISOString(), tests: {}, failures: [] };
 
   const tests = [
     { name: "Firestore", fn: checkFirestore },
     { name: "Integrite comptes", fn: checkUserIntegrity },
+    { name: "Comptes Firebase Auth", fn: checkAuthAccounts },
     { name: "App accessible", fn: checkAppReachable },
     { name: "Resend + domaine email", fn: checkResend },
     { name: "Backup quotidien", fn: backupUsers },

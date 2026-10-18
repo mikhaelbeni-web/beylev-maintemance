@@ -1,5 +1,6 @@
 // Import de taches Hostaway - proxy securise
 // Le secret est lu dans les variables d environnement Vercel, jamais expose au frontend
+const fb = require("./_lib/firebase");
 const HOSTAWAY_ACCOUNT_ID = process.env.HOSTAWAY_ACCOUNT_ID || "148614";
 const HOSTAWAY_API_KEY = process.env.HOSTAWAY_CLIENT_SECRET;
 
@@ -54,8 +55,9 @@ async function fetchAllReservations(token, arrivalStart, arrivalEnd) {
 }
 
 module.exports = async (req, res) => {
-  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Cache-Control", "no-store");
   try {
+    await fb.requireUser(req, { roles: ["admin", "manager"] });
     const token = await getToken();
     const debug = req.query.debug === "1";
 
@@ -123,6 +125,6 @@ module.exports = async (req, res) => {
     if (debug) payload.raw = { rawTasks, allRawTasks, listings };
     res.status(200).json(payload);
   } catch (e) {
-    res.status(e.status === 403 ? 403 : 500).json({ error: e.message });
+    res.status([401, 403].includes(e.status) ? e.status : 500).json({ error: e.message });
   }
 };
