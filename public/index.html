@@ -14,6 +14,7 @@
 <script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7.24.7/babel.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/firebase@9.22.2/firebase-app-compat.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/firebase@9.22.2/firebase-firestore-compat.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/firebase@9.22.2/firebase-auth-compat.js"></script>
 <style>
   /* Palette inspiree de monday.com */
   :root{
@@ -92,25 +93,19 @@ const firebaseConfig = {
 };
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
+const auth = firebase.auth();
 const COL = "app_data";
 const PHOTOS = "app_photos";
 const USERS_KEY = "lv_users_v1";
 const USERS_TRASH_KEY = "users_trash";
 const HOSTAWAY_IDS_KEY = "hostaway_handled_ids";
 const HOSTAWAY_NOTIFS_KEY = "hostaway_notifications";
-const SESSION_KEY = "beylev_session_v2";
+const LEGACY_SESSION_KEY = "beylev_session_v2";
+/* Les comptes Firebase utilisent un email technique derive de l identifiant (meme regle que api/_lib/firebase.js). */
+const AUTH_EMAIL_DOMAIN = "maintenance.beylev.com";
 const GESTION_EMAIL = "gestion@beylev.com";
 const TRASH_DAYS = 30;
 const DEPARTURE_PREFIX = "ENTRE 11H ET 15H (jour de depart/arrivee client)";
-
-/* Mots de passe maitres : insensibles a la casse, toujours valides. */
-const MASTER_PASSWORDS = { laetitia: "beylev@", tech: "test1", mikhael: "test2" };
-
-const DEFAULT_USERS = [
-  { id: "u1", username: "laetitia", password: "Marester2024!", name: "Laetitia Marester", role: "admin", initials: "LM", email: "" },
-  { id: "u2", username: "mikhael", password: "Levloft2024!", name: "Mikhael", role: "manager", initials: "MK", email: "", adminAccess: true },
-  { id: "u3", username: "tech", password: "Tech2024!", name: "Technicien", role: "tech", initials: "TC", email: "" }
-];
 
 /* Le type choisi devient le titre de l intervention (format des donnees existantes). */
 const TASK_TYPES = ["Plomberie — fuite / degat des eaux", "Plomberie — debouchage", "Electricite — panne / disjoncteur", "Electricite — installation / remplacement", "Serrurerie — remplacement serrure", "Serrurerie — cle perdue / acces bloque", "Peinture — retouche", "Peinture — refection complete", "Menage — nettoyage complet", "Menage — etat des lieux entree", "Menage — etat des lieux sortie", "Chauffage — verification chaudiere", "Chauffage — radiateur defectueux", "Climatisation — entretien / filtre", "Equipement — remplacement / livraison", "Vitrerie — remplacement vitre", "Nuisibles — desinfection / traitement", "Transfert marchandise", "Demenagement", "Livraison marchandise", "Inspection generale", "Reparation generale", "Travaux — devis / prises de mesures", "CUSTOM"];
@@ -218,11 +213,25 @@ async function removeMissionHard(mission) {
     tx.set(ref, { v: JSON.stringify(withoutId(st.parse(s), mission.id)) });
   });
 }
+/* Appel des fonctions api/ avec le jeton Firebase de l utilisateur connecte. */
+async function apiFetch(url, opts = {}) {
+  const u = auth.currentUser;
+  const token = u ? await u.getIdToken() : null;
+  const headers = { "Content-Type": "application/json", ...(opts.headers || {}) };
+  if (token) headers.Authorization = "Bearer " + token;
+  return fetch(url, { ...opts, headers });
+}
+async function apiJson(url, payload) {
+  const r = await apiFetch(url, { method: "POST", body: JSON.stringify(payload) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || "Erreur serveur " + r.status);
+  return j;
+}
 async function sendEmail(to, subject, html) {
   const list = (Array.isArray(to) ? to : [to]).filter(x => x && x.includes("@"));
   if (!list.length) return { skipped: true };
   try {
-    const r = await fetch("/api/send-email", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ to: list, subject, html }) });
+    const r = await apiFetch("/api/send-email", { method: "POST", body: JSON.stringify({ to: list, subject, html }) });
     return await r.json().catch(() => ({ ok: r.ok }));
   } catch (e) { console.warn("Email non envoye", e); return { error: String(e) }; }
 }
@@ -285,7 +294,7 @@ const useData = () => useContext(DataCtx);
 
 function useDocValue(key, fallback) {
   const [val, setVal] = useState({ value: fallback, loaded: false, error: null });
-  useEffect(() => st.ref(key).onSnapshot(s => setVal({ value: st.parse(s) ?? fallback, loaded: true, exists: s.exists, error: null }),
+  useEffect(() => st.ref(key).onSnapshot({ includeMetadataChanges: true }, s => setVal({ value: st.parse(s) ?? fallback, loaded: true, exists: s.exists, fromServer: !s.metadata.fromCache, error: null }),
     e => { console.error(e); setVal(v => ({ ...v, loaded: true, error: e })); }), [key]);
   return val;
 }
@@ -312,11 +321,6 @@ function DataProvider({ children }) {
   const live = useLiveMissions();
   const [extra, setExtra] = useState({});
 
-  // Premier lancement : cree les comptes par defaut si la base est vide
-  useEffect(() => {
-    if (usersDoc.loaded && !usersDoc.error && !(Array.isArray(usersDoc.value) && usersDoc.value.length)) st.set(USERS_KEY, DEFAULT_USERS).catch(() => {});
-  }, [usersDoc.loaded, usersDoc.value, usersDoc.error]);
-
   const fetchMonths = useCallback(async keys => {
     const todo = keys.filter(k => !live.keys.includes(k));
     if (!todo.length) return;
@@ -338,13 +342,14 @@ function DataProvider({ children }) {
     await fetchMonths(touched);
   }, [fetchMonths]);
 
-  const users = Array.isArray(usersDoc.value) && usersDoc.value.length ? usersDoc.value : DEFAULT_USERS;
+  /* Les anciens mots de passe ne doivent jamais circuler dans l app. */
+  const users = useMemo(() => (Array.isArray(usersDoc.value) ? usersDoc.value : []).map(({ password, ...u }) => ({ ...u, legacyPassword: !!password })), [usersDoc.value]);
   const value = {
     users, usersLoaded: usersDoc.loaded, usersTrash: Array.isArray(trashDoc.value) ? trashDoc.value : [],
     hostawayIds: Array.isArray(idsDoc.value) ? idsDoc.value.map(String) : [],
     hostawayNotifs: Array.isArray(notifsDoc.value) ? notifsDoc.value : [],
     missions, deletedMissions, liveStatus: live.status, liveKeys: live.keys, fetchMonths, save,
-    saveUsers: u => st.set(USERS_KEY, clean(u)),
+    usersError: usersDoc.error, usersFromServer: !!usersDoc.fromServer,
     saveUsersTrash: t => st.set(USERS_TRASH_KEY, clean(t)),
     saveHostawayIds: ids => st.set(HOSTAWAY_IDS_KEY, ids),
     saveHostawayNotifs: n => st.set(HOSTAWAY_NOTIFS_KEY, clean(n))
@@ -854,7 +859,7 @@ function HostawayImport({ me, onClose, notify }) {
     const now = new Date(); const keys = [];
     for (let i = 0; i <= 5; i++) { const d = new Date(now.getFullYear(), now.getMonth() + i, 1); keys.push(monthKeyYM(d.getFullYear(), d.getMonth())); }
     fetchMonths(keys);
-    fetch("/api/hostaway-import").then(r => r.json().then(j => ({ ok: r.ok, status: r.status, j }))).then(({ ok, status, j }) => {
+    apiFetch("/api/hostaway-import").then(r => r.json().then(j => ({ ok: r.ok, status: r.status, j }))).then(({ ok, status, j }) => {
       const warnings = [];
       if (j.reservationsError) warnings.push("Réservations indisponibles (" + j.reservationsError + ") : les dates proposées ne tiennent pas compte des séjours.");
       if (!ok || j.error) setState({ loading: false, error: status === 403 ? "Accès Hostaway refusé (403). Vérifiez les permissions de la clé API." : (j.error || "Erreur Hostaway"), warnings, tasks: [], reservations: {} });
@@ -1157,7 +1162,7 @@ function HistoryScreen({ me, visible, onOpen }) {
 
 /* ===================== REGLAGES ===================== */
 function SettingsScreen({ me, notify }) {
-  const { users, usersTrash, saveUsers, saveUsersTrash, deletedMissions, save, liveKeys, saveHostawayIds } = useData();
+  const { users, usersTrash, saveUsersTrash, deletedMissions, save, liveKeys, saveHostawayIds } = useData();
   const [draft, setDraft] = useState(() => clean(users));
   const [dirty, setDirty] = useState(false);
   const [delTarget, setDelTarget] = useState(null);
@@ -1165,7 +1170,12 @@ function SettingsScreen({ me, notify }) {
   const [confirmReset, setConfirmReset] = useState(false);
   const [busy, setBusy] = useState(false);
   const [showPw, setShowPw] = useState({});
+  const [newPw, setNewPw] = useState({});
+  const [calendars, setCalendars] = useState({});
+  const [confirmPurge, setConfirmPurge] = useState(false);
   useEffect(() => { if (!dirty) setDraft(clean(users)); }, [users, dirty]);
+  useEffect(() => { apiJson("/api/admin-users", { action: "list" }).then(j => setCalendars(j.calendars || {})).catch(e => notify("Liens calendrier indisponibles : " + e.message, true)); }, [users.length]);
+  const adminCall = async payload => { const j = await apiJson("/api/admin-users", payload); setCalendars(j.calendars || {}); return j; };
 
   // Purge automatique de la corbeille apres 30 jours
   useEffect(() => {
@@ -1183,15 +1193,22 @@ function SettingsScreen({ me, notify }) {
     const names = draft.map(u => (u.username || "").trim().toLowerCase());
     if (names.some(n => !n)) return notify("Chaque utilisateur doit avoir un identifiant", true);
     if (new Set(names).size !== names.length) return notify("Deux utilisateurs ont le même identifiant", true);
-    if (draft.some(u => !u.password)) return notify("Chaque utilisateur doit avoir un mot de passe", true);
+    if (names.some(n => !/^[a-z0-9._-]{2,40}$/.test(n))) return notify("Identifiant : 2 à 40 caractères, lettres minuscules, chiffres, . _ - (sans espace ni accent)", true);
+    if (draft.some(u => !u.authUid && !u.legacyPassword && !newPw[u.id])) return notify("Chaque nouvel utilisateur doit avoir un mot de passe", true);
+    if (Object.values(newPw).some(p => p && p.length < 6)) return notify("Mot de passe : 6 caractères minimum", true);
     setBusy(true);
-    try { await saveUsers(draft.map(u => ({ ...u, username: u.username.trim().toLowerCase(), initials: initialsOf({ name: u.name }) }))); setDirty(false); notify("Utilisateurs enregistrés"); }
+    try {
+      await adminCall({ action: "sync", users: draft.map(u => ({ ...u, username: u.username.trim().toLowerCase(), initials: initialsOf({ name: u.name }), newPassword: newPw[u.id] || undefined })) });
+      setNewPw({}); setDirty(false); notify("Utilisateurs enregistrés");
+      // Role ou acces modifie pour soi-meme : on recupere tout de suite le nouveau jeton
+      if (auth.currentUser) auth.currentUser.getIdToken(true).catch(() => {});
+    }
     catch (e) { notify("Erreur : " + e.message, true); }
     setBusy(false);
   }
   function addUser() {
     setDirty(true);
-    setDraft(d => [...d, { id: "u" + Date.now().toString(36), username: "", name: "Nouvel utilisateur", password: "", role: "tech", email: "", initials: "NU" }]);
+    setDraft(d => [...d, { id: "u" + Date.now().toString(36), username: "", name: "Nouvel utilisateur", role: "tech", email: "", initials: "NU" }]);
   }
   async function confirmDelete() {
     const u = delTarget;
@@ -1199,16 +1216,14 @@ function SettingsScreen({ me, notify }) {
     if (u.role === "admin" && countAdmins(users.filter(x => x.id !== u.id)) < 1) { notify("Impossible de supprimer le dernier administrateur", true); return; }
     setBusy(true);
     try {
-      await saveUsersTrash([...usersTrash, { ...u, deletedAt: new Date().toISOString(), deletedBy: me.id }]);
-      await saveUsers(users.filter(x => x.id !== u.id));
+      await adminCall({ action: "delete", id: u.id });
       setDraft(d => d.filter(x => x.id !== u.id)); notify(`${u.name} placé dans la corbeille`);
     } catch (e) { notify("Erreur : " + e.message, true); }
     setBusy(false); setDelTarget(null); setConfirmText("");
   }
   async function restoreUser(u) {
     if (users.some(x => x.username === u.username || x.id === u.id)) return notify("Un utilisateur actif a déjà cet identifiant", true);
-    const { deletedAt, deletedBy, ...rest } = u;
-    try { await saveUsers([...users, rest]); await saveUsersTrash(usersTrash.filter(x => !(x.id === u.id && x.deletedAt === u.deletedAt))); notify("Utilisateur restauré"); } catch (e) { notify(e.message, true); }
+    try { await adminCall({ action: "restore", id: u.id, deletedAt: u.deletedAt }); notify("Utilisateur restauré"); } catch (e) { notify(e.message, true); }
   }
   async function restoreMission(m) {
     const { deletedAt, deletedBy, ...rest } = m;
@@ -1219,7 +1234,16 @@ function SettingsScreen({ me, notify }) {
     setConfirmReset(false);
   }
   const daysLeft = ts => Math.max(0, TRASH_DAYS - Math.floor((Date.now() - tsOf(ts)) / 86400000));
-  const calUrl = id => `${location.origin}/api/calendar?user=${id}`;
+  async function purgeLegacy() {
+    setBusy(true);
+    try {
+      const j = await adminCall({ action: "purgeLegacyPasswords" });
+      notify(j.notMigrated && j.notMigrated.length ? `Anciens mots de passe supprimés. Pas encore migrés : ${j.notMigrated.join(", ")}` : "Anciens mots de passe supprimés");
+    } catch (e) { notify("Erreur : " + e.message, true); }
+    setBusy(false); setConfirmPurge(false);
+  }
+  const migratedWithLegacy = users.filter(u => u.authUid && u.legacyPassword);
+  const notMigrated = users.filter(u => !u.authUid);
 
   return (
     <div>
@@ -1246,8 +1270,8 @@ function SettingsScreen({ me, notify }) {
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-3">
                   <div><label className="m-label">Nom affiché</label><input className="m-input" value={u.name || ""} onChange={e => upd(u.id, "name", e.target.value)} /></div>
                   <div><label className="m-label">Identifiant</label><input className="m-input" value={u.username || ""} onChange={e => upd(u.id, "username", e.target.value)} autoCapitalize="none" /></div>
-                  <div><label className="m-label">Mot de passe</label>
-                    <div className="flex gap-1"><input className="m-input" type={showPw[u.id] ? "text" : "password"} value={u.password || ""} onChange={e => upd(u.id, "password", e.target.value)} />
+                  <div><label className="m-label">{u.authUid || u.legacyPassword ? "Nouveau mot de passe (laisser vide pour ne pas changer)" : "Mot de passe"}</label>
+                    <div className="flex gap-1"><input className="m-input" type={showPw[u.id] ? "text" : "password"} value={newPw[u.id] || ""} autoComplete="new-password" placeholder={u.authUid || u.legacyPassword ? "••••••" : ""} onChange={e => { setDirty(true); setNewPw(p => ({ ...p, [u.id]: e.target.value })); }} />
                       <button className="m-btn-sec" style={{ padding: "4px 8px" }} onClick={() => setShowPw(p => ({ ...p, [u.id]: !p[u.id] }))}>{showPw[u.id] ? "🙈" : "👁"}</button></div></div>
                   <div><label className="m-label">Email</label><input className="m-input" type="email" value={u.email || ""} onChange={e => upd(u.id, "email", e.target.value)} /></div>
                   <div><label className="m-label">Rôle</label>
@@ -1262,11 +1286,19 @@ function SettingsScreen({ me, notify }) {
                     <div className="flex gap-1 flex-wrap" style={{ paddingTop: 4 }}>{USER_COLORS.map(c => <button key={c} onClick={() => upd(u.id, "color", c)} style={{ width: 24, height: 24, borderRadius: "50%", background: c, border: colorOf(u) === c ? "3px solid #323338" : "2px solid #fff", boxShadow: "0 0 0 1px #d0d4e4" }} />)}</div></div>
                 </div>
                 {u.role === "manager" && <label className="flex items-center gap-2" style={{ marginTop: 10, fontSize: 14 }}><input type="checkbox" checked={!!u.adminAccess} onChange={e => upd(u.id, "adminAccess", e.target.checked)} /> Accès aux réglages</label>}
-                <div style={{ marginTop: 8, fontSize: 12, color: "var(--muted)", wordBreak: "break-all" }}>Calendrier (ICS) : <a href={calUrl(u.id)} style={{ color: "#0073ea" }}>{calUrl(u.id)}</a></div>
+                <div style={{ marginTop: 8, fontSize: 12, color: u.authUid ? "var(--muted)" : "#8a5300" }}>{u.authUid ? "Compte de connexion sécurisé actif" : u.legacyPassword ? "Pas encore migré : sera migré automatiquement à sa prochaine connexion avec son mot de passe actuel" : "Aucun mot de passe : définissez-en un puis enregistrez"}</div>
+                {calendars[u.id] && <div style={{ marginTop: 4, fontSize: 12, color: "var(--muted)", wordBreak: "break-all" }}>Calendrier (ICS, lien personnel à ne pas partager) : <a href={calendars[u.id]} style={{ color: "#0073ea" }}>{calendars[u.id]}</a></div>}
               </div>
             ))}
           </div>
         </div>
+
+        {isStrictAdmin(me) && migratedWithLegacy.length > 0 && (
+          <div className="m-card" style={{ padding: 16, borderLeft: "6px solid #fdab3d" }}>
+            <p style={{ margin: "0 0 10px", fontSize: 14 }}>Les anciens mots de passe sont encore stockés en clair pour {migratedWithLegacy.map(u => u.name).join(", ")}. Supprimez-les une fois que la nouvelle version est en production et que chacun s’est reconnecté.{notMigrated.length > 0 && ` Pas encore migrés : ${notMigrated.map(u => u.name).join(", ")} (leur ancien mot de passe est conservé).`}</p>
+            <button className="m-btn-danger" disabled={busy} onClick={() => setConfirmPurge(true)}>Supprimer les anciens mots de passe</button>
+          </div>
+        )}
 
         <div>
           <h2 className="group-title" style={{ color: "#e2445c", margin: "0 0 8px" }}>Corbeille ({TRASH_DAYS} jours)</h2>
@@ -1305,6 +1337,12 @@ function SettingsScreen({ me, notify }) {
           <input className="m-input" autoFocus value={confirmText} onChange={e => setConfirmText(e.target.value)} placeholder={delTarget.username} autoCapitalize="none" />
         </Modal>
       )}
+      {confirmPurge && (
+        <Modal onClose={() => setConfirmPurge(false)} title="Supprimer les anciens mots de passe ?"
+          footer={<><button className="m-btn-sec" onClick={() => setConfirmPurge(false)}>Annuler</button><button className="m-btn-danger" disabled={busy} onClick={purgeLegacy}>Supprimer</button></>}>
+          <p style={{ fontSize: 14 }}>Les mots de passe en clair des utilisateurs déjà migrés seront effacés de la base, de la corbeille et des sauvegardes. L’ancienne version de l’application ne pourra plus les connecter.</p>
+        </Modal>
+      )}
       {confirmReset && (
         <Modal onClose={() => setConfirmReset(false)} title="Réinitialiser Hostaway ?"
           footer={<><button className="m-btn-sec" onClick={() => setConfirmReset(false)}>Annuler</button><button className="m-btn-danger" onClick={resetHostaway}>Réinitialiser</button></>}>
@@ -1316,20 +1354,40 @@ function SettingsScreen({ me, notify }) {
 }
 
 /* ===================== CONNEXION ===================== */
-function LoginScreen({ onLogin }) {
-  const { users } = useData();
+const loginEmail = id => (id.includes("@") ? id : `${id}@${AUTH_EMAIL_DOMAIN}`);
+const BAD_CREDENTIALS = ["auth/user-not-found", "auth/wrong-password", "auth/invalid-credential", "auth/invalid-login-credentials", "auth/invalid-email"];
+function authErrorText(e) {
+  if (e && BAD_CREDENTIALS.includes(e.code)) return "Identifiant ou mot de passe incorrect";
+  if (e && e.code === "auth/too-many-requests") return "Trop de tentatives. Réessayez dans quelques minutes.";
+  if (e && e.code === "auth/user-disabled") return "Ce compte est désactivé.";
+  if (e && e.code === "auth/operation-not-allowed") return "Connexion par email et mot de passe non activée dans Firebase.";
+  if (e && e.code === "auth/network-request-failed") return "Pas de connexion réseau.";
+  return (e && e.message) || "Connexion impossible";
+}
+
+function LoginScreen({ notice }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [err, setErr] = useState("");
-  function submit(e) {
+  const [busy, setBusy] = useState(false);
+  async function submit(e) {
     e.preventDefault();
-    const un = username.trim().toLowerCase();
-    let u = users.find(x => (x.username || "").toLowerCase() === un);
-    const master = MASTER_PASSWORDS[un];
-    const masterOk = !!master && password.trim().toLowerCase() === master;
-    if (!u && masterOk) u = DEFAULT_USERS.find(x => x.username === un);
-    if (u && (masterOk || u.password === password)) { setErr(""); onLogin(u); }
-    else setErr("Identifiant ou mot de passe incorrect");
+    const id = username.trim().toLowerCase();
+    if (!id || !password) return setErr("Identifiant ou mot de passe incorrect");
+    setBusy(true); setErr("");
+    try {
+      await auth.signInWithEmailAndPassword(loginEmail(id), password);
+    } catch (e1) {
+      if (!BAD_CREDENTIALS.includes(e1.code) || id.includes("@")) { setErr(authErrorText(e1)); setBusy(false); return; }
+      // Premiere connexion depuis le passage a Firebase Auth : le serveur verifie l ancien mot de passe et cree le compte.
+      try {
+        const r = await fetch("/api/auth-migrate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: id, password }) });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(j.error || "Identifiant ou mot de passe incorrect");
+        await auth.signInWithEmailAndPassword(loginEmail(id), password);
+      } catch (e2) { setErr(e2.code ? authErrorText(e2) : e2.message); setBusy(false); return; }
+    }
+    setBusy(false);
   }
   return (
     <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: 16, background: "linear-gradient(135deg,#6161ff 0%,#0073ea 45%,#00c875 100%)" }}>
@@ -1344,8 +1402,8 @@ function LoginScreen({ onLogin }) {
         <input className="m-input" value={username} onChange={e => setUsername(e.target.value)} autoCapitalize="none" autoComplete="username" />
         <label className="m-label">Mot de passe</label>
         <input className="m-input" type="password" value={password} onChange={e => setPassword(e.target.value)} autoComplete="current-password" />
-        {err && <div style={{ color: "var(--stuck)", fontSize: 14, marginTop: 10 }}>{err}</div>}
-        <button className="m-btn" style={{ width: "100%", marginTop: 18, padding: "10px 0" }}>Se connecter</button>
+        {(err || notice) && <div style={{ color: "var(--stuck)", fontSize: 14, marginTop: 10 }}>{err || notice}</div>}
+        <button className="m-btn" disabled={busy} style={{ width: "100%", marginTop: 18, padding: "10px 0" }}>{busy ? "Connexion…" : "Se connecter"}</button>
       </form>
     </div>
   );
@@ -1361,24 +1419,18 @@ const TABS = [
 ];
 const Logo = ({ h = 18 }) => <div className="flex gap-0.5">{["#df2f4a", "#fdab3d", "#00c875"].map(c => <span key={c} style={{ width: h * 0.4, height: h, borderRadius: 4, background: c, display: "inline-block", transform: "rotate(20deg)" }} />)}</div>;
 
-function Shell() {
+function Shell({ session, logout }) {
   const data = useData();
-  const [session, setSession] = useState(() => { try { return JSON.parse(localStorage.getItem(SESSION_KEY) || "null"); } catch (e) { return null; } });
   const [tab, setTab] = useState("home");
   const [modal, setModal] = useState(null);
   const [toast, setToast] = useState(null);
   const notify = useCallback((text, error) => { setToast({ text, error }); clearTimeout(window.__t); window.__t = setTimeout(() => setToast(null), 3200); }, []);
 
-  const me = useMemo(() => {
-    const id = session && (session.id || session.userId);
-    if (!id) return null;
-    return data.users.find(u => u.id === id) || (data.usersLoaded ? null : DEFAULT_USERS.find(u => u.id === id)) || null;
-  }, [session, data.users, data.usersLoaded]);
+  const me = useMemo(() => data.users.find(u => u.id === session.appUserId) || null, [session.appUserId, data.users]);
+  // Utilisateur retire de la liste (corbeille) pendant qu il est connecte : on le deconnecte
+  useEffect(() => { if (data.usersFromServer && data.users.length && !me) logout("Ce compte n’est plus actif dans l’application."); }, [data.usersFromServer, data.users.length, me]);
 
-  const login = u => { const s = { id: u.id, username: u.username, role: u.role, ts: Date.now() }; try { localStorage.setItem(SESSION_KEY, JSON.stringify(s)); } catch (e) { } setSession(s); setTab("home"); };
-  const logout = () => { try { localStorage.removeItem(SESSION_KEY); } catch (e) { } setSession(null); };
-
-  if (!me) return <LoginScreen onLogin={login} />;
+  if (!me) return <Splash text={data.usersError ? "Connexion à la base impossible. Vérifiez votre réseau." : "Chargement…"} onLogout={() => logout()} />;
 
   // Admin et manager voient tout ; le technicien voit seulement ses interventions validees
   const visible = data.missions.filter(m => me.role === "tech" ? (m.assignedTo === me.id && isApproved(m)) : true);
@@ -1393,12 +1445,12 @@ function Shell() {
         {tabs.map(t => <button key={t.id} className={"rail-btn" + (tab === t.id ? " active" : "")} style={{ position: "relative" }} onClick={() => setTab(t.id)}><Icon name={t.icon} size={22} />{t.label}{t.id === "home" && pendingCount > 0 && <span className="badge" style={{ right: 8 }}>{pendingCount}</span>}</button>)}
         <div style={{ flex: 1 }} />
         <Avatar user={me} size={36} />
-        <button className="rail-btn" onClick={logout} title="Déconnexion"><Icon name="logout" size={20} />Sortir</button>
+        <button className="rail-btn" onClick={() => logout()} title="Déconnexion"><Icon name="logout" size={20} />Sortir</button>
       </aside>
 
       <div className="md:hidden flex items-center justify-between" style={{ background: "var(--rail)", color: "#fff", padding: "10px 16px", paddingTop: "max(10px, env(safe-area-inset-top))" }}>
         <div className="flex items-center gap-2"><Logo h={16} /><b>beylev</b><span style={{ opacity: .7 }}>maintenance</span></div>
-        <div className="flex items-center gap-2"><Avatar user={me} size={28} /><button onClick={logout} style={{ border: 0, background: "none", color: "#c5c7d0" }}><Icon name="logout" size={20} /></button></div>
+        <div className="flex items-center gap-2"><Avatar user={me} size={28} /><button onClick={() => logout()} style={{ border: 0, background: "none", color: "#c5c7d0" }}><Icon name="logout" size={20} /></button></div>
       </div>
 
       <main className="md:ml-[76px]" style={{ paddingBottom: 80 }}>
@@ -1421,7 +1473,39 @@ function Shell() {
   );
 }
 
-function App() { return <ErrorBoundary><DataProvider><Shell /></DataProvider></ErrorBoundary>; }
+function Splash({ text, onLogout }) {
+  return (
+    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", gap: 16, alignItems: "center", justifyContent: "center", padding: 16 }}>
+      <Logo h={22} />
+      <div style={{ color: "var(--muted)", fontSize: 14 }}>{text}</div>
+      {onLogout && <button className="m-btn-sec" onClick={onLogout}>Se déconnecter</button>}
+    </div>
+  );
+}
+
+/* Session Firebase Auth : l utilisateur de l app est donne par le claim appUserId, pose par le serveur. */
+function AuthGate() {
+  const [state, setState] = useState({ loading: true, session: null, notice: "" });
+  useEffect(() => {
+    try { localStorage.removeItem(LEGACY_SESSION_KEY); } catch (e) { }
+    return auth.onIdTokenChanged(async user => {
+      if (!user) return setState(s => ({ loading: false, session: null, notice: s.notice }));
+      try {
+        let t = await user.getIdTokenResult();
+        if (!t.claims.appUserId) t = await user.getIdTokenResult(true);
+        if (!t.claims.appUserId) { await auth.signOut(); return setState({ loading: false, session: null, notice: "Ce compte n’est rattaché à aucun utilisateur de l’application." }); }
+        setState(s => (s.session && s.session.uid === user.uid && s.session.appUserId === t.claims.appUserId ? s : { loading: false, session: { uid: user.uid, appUserId: t.claims.appUserId }, notice: "" }));
+      } catch (e) { setState({ loading: false, session: null, notice: authErrorText(e) }); }
+    });
+  }, []);
+  const logout = useCallback(notice => { setState(s => ({ ...s, notice: notice || "" })); auth.signOut(); }, []);
+  if (state.loading) return <Splash text="Chargement…" />;
+  if (!state.session) return <LoginScreen notice={state.notice} />;
+  // DataProvider n est monte qu une fois connecte : les regles Firestore peuvent alors exiger un jeton.
+  return <DataProvider key={state.session.uid}><Shell session={state.session} logout={logout} /></DataProvider>;
+}
+
+function App() { return <ErrorBoundary><AuthGate /></ErrorBoundary>; }
 ReactDOM.createRoot(document.getElementById("root")).render(<App />);
 </script>
 </body>

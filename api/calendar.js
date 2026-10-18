@@ -1,5 +1,6 @@
-const PROJECT_ID = 'planning-maintenance-9a3c4';
-const API_KEY    = 'AIzaSyB7i6PnqFAdBuGuFM84BKGYWwRT0P8GClc';
+// Flux ICS par utilisateur : /api/calendar?user=u3&k=<jeton signe>. Le lien complet est affiche dans Reglages.
+// Les applications calendrier ne peuvent pas envoyer de jeton Firebase, d'ou la signature dans l'URL.
+const fb = require('./_lib/firebase');
 
 function escICS(s){return(s||'').replace(/\\/g,'\\\\').replace(/\n/g,'\\n').replace(/,/g,'\\,').replace(/;/g,'\\;');}
 function d2ICS(d){return d.replace(/-/g,'');}
@@ -18,25 +19,25 @@ function generateICS(missions){
 
 module.exports = async (req, res) => {
   const userId = req.query.user || null;
+  try {
+    if (!fb.calendarTokenOk(userId, req.query.k)) return res.status(401).send('Lien calendrier invalide : recopiez-le depuis Reglages');
+  } catch (e) { return res.status(500).send(e.message); }
   const months = [];
   const now = new Date();
   for(let i=-2;i<=4;i++){const d=new Date(now.getFullYear(),now.getMonth()+i,1);const y=d.getFullYear();const m=String(d.getMonth()+1).padStart(2,'0');months.push(`lv_missions_${y}_${m}`);}
   const allMissions=[];
   await Promise.all(months.map(async key=>{
     try{
-      const url=`https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents/app_data/${key}?key=${API_KEY}`;
-      const r=await fetch(url);if(!r.ok)return;
-      const data=await r.json();
-      if(data.fields?.v?.stringValue){
-        const monthData=JSON.parse(data.fields.v.stringValue);
-        Object.values(monthData).flat().forEach(m=>{
-          if(m.approved===false||m.approved==='rejected')return;
-          if(m.status==='cancelled'||m.deletedAt)return;
-          if(userId&&m.assignedTo!==userId)return;
-          allMissions.push(m);
-        });
-      }
-    }catch{}
+      const monthData=await fb.getDoc(key);
+      if(!monthData||typeof monthData!=='object')return;
+      Object.values(monthData).flat().forEach(m=>{
+        if(!m||!m.date)return;
+        if(m.approved===false||m.approved==='rejected')return;
+        if(m.status==='cancelled'||m.deletedAt)return;
+        if(m.assignedTo!==userId)return;
+        allMissions.push(m);
+      });
+    }catch(e){console.error('calendar',key,e.message);}
   }));
   const seen=new Set();
   const unique=allMissions.filter(m=>{if(seen.has(m.id))return false;seen.add(m.id);return true;});
