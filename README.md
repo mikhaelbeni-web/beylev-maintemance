@@ -31,6 +31,7 @@ Chaque document contient `{ v: "<JSON>" }`.
 
 - `lv_users_v1` : tableau des comptes
 - `lv_missions_AAAA_MM` : `{ "AAAA-MM-JJ": [missions] }`, toujours ecrit dans le mois de la date de debut
+- `lv_companies_v1` : `[{ id, name, addresses: ["adresse"] }]`, une adresse appartient a une seule societe ; le lien se fait sur le texte du champ `location` des missions (casse et accents ignores), les missions ne sont pas modifiees
 - `users_trash`, `hostaway_handled_ids`, `hostaway_notifications`, `users_backups`
 - `app_photos/{id}` : `{ b: "<base64>" }`, reference par `mission.photos[{ id }]`
 
