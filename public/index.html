@@ -1009,7 +1009,7 @@ const MONDAY_FIELDS = [
   { id: "date", label: "Date", keys: ["date", "echeance", "jour", "timeline", "chronologie", "planning", "due"] },
   { id: "status", label: "Statut", keys: ["statut", "status", "etat"] },
   { id: "assignee", label: "Technicien", keys: ["technicien", "personne", "assigne", "responsable", "owner", "people", "intervenant"] },
-  { id: "description", label: "Description", keys: ["description", "notes", "note", "detail", "commentaire", "probleme"] },
+  { id: "description", label: "Description", keys: ["description", "notes", "note", "detail", "comment", "probleme"] },
   { id: "duration", label: "Durée (minutes)", keys: ["duree", "duration", "temps", "minutes"] }
 ];
 const NAME_COL = "__name__";
@@ -1030,6 +1030,19 @@ function mondayStatus(text) {
   if (/annul|cancel/.test(t)) return "cancelled";
   return "todo";
 }
+/* Quand le tableau n est pas organise par adresse, le nom de l element contient souvent le surnom du lieu
+   (« VERSAILLES SOL »). Un mot distinctif de la rue qui ne designe qu un seul immeuble suffit ; plusieurs
+   immeubles possibles ou aucun : pas d adresse, a choisir dans l apercu. */
+const STREET_STOP = new Set("rue avenue boulevard bd av de du la le les des d l saint st bis cours chemin paris cc hotel".split(" "));
+let streetTokens = null;
+function guessBuilding(text) {
+  const exact = matchBuilding(text); if (exact) return exact;
+  const a = norm(text); if (!a) return null;
+  if (!streetTokens) streetTokens = BUILDINGS_LIST.filter(b => b !== "CUSTOM").map(b => [b, norm(b.replace(/\b\d{5}\b.*$/, "")).split(" ").filter(t => t.length > 2 && !STREET_STOP.has(t) && !/^\d+$/.test(t))]);
+  const words = new Set(a.split(" "));
+  const hits = streetTokens.filter(([, ts]) => ts.some(t => words.has(t)));
+  return hits.length === 1 ? hits[0][0] : null;
+}
 /* Transforme un element Monday en intervention. Une date absente prend la date de creation de l element. */
 function mondayToMission(item, map, users, defaultTech, me) {
   const val = k => (map[k] === NAME_COL ? item.name : map[k] ? (item.values[map[k]] || "") : "").trim();
@@ -1039,16 +1052,17 @@ function mondayToMission(item, map, users, defaultTech, me) {
   const who = val("assignee").split(",").map(norm).filter(Boolean)[0];
   const tech = who && (users.find(u => norm(u.name) === who) || users.find(u => norm(u.name).includes(who) || who.includes(norm(u.name).split(" ")[0])));
   const loc = val("location");
+  const guessed = !loc ? guessBuilding(item.name) : null;
   const m = {
     id: uid(), mondayId: item.id, title: val("title") || item.name || "Élément Monday",
-    location: matchBuilding(loc) || loc, description: val("description"),
+    location: matchBuilding(loc) || loc || guessed || "", description: val("description"),
     date: dates[0] || created, status: mondayStatus(val("status")), assignedTo: (tech || {}).id || defaultTech,
     priority: "normal", duration: parseInt(val("duration"), 10) || 0, approved: true,
     createdBy: me.id, createdAt: new Date().toISOString(), photos: [], comments: []
   };
   if (dates[1] && dates[1] > m.date) m.dateEnd = dates[1];
   if (time.length) m.time = `${pad(time[0])}:${time[1]}`;
-  return { mission: m, noDate: !dates.length, noTech: !tech };
+  return { mission: m, noDate: !dates.length, noTech: !tech, guessedPlace: !!guessed };
 }
 
 /* Synchro Monday -> app : les nouveaux elements du tableau sont importes a l ouverture puis toutes les 10 minutes */
@@ -1092,6 +1106,8 @@ function MondayImport({ me, onClose, notify }) {
   const [auto, setAuto] = useState(cfg.auto !== false);
   const [hideDone, setHideDone] = useState(false);
   const [excluded, setExcluded] = useState({});
+  const [addr, setAddr] = useState({});
+  const addresses = useAllAddresses();
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -1109,12 +1125,13 @@ function MondayImport({ me, onClose, notify }) {
   const rows = data && map ? data.items.filter(it => !known.has(it.id)).map(it => ({ item: it, ...mondayToMission(it, map, users, defaultTech, me) })) : [];
   const shown = rows.filter(r => !hideDone || r.mission.status !== "done");
   const selected = shown.filter(r => !excluded[r.item.id]);
+  const noPlace = selected.filter(r => !r.mission.location && !addr[r.item.id]).length;
   const already = data ? data.items.length - rows.length : 0;
 
   async function submit() {
     setBusy(true);
     try {
-      const n = selected.length ? await importMissions(selected.map(r => r.mission)) : 0;
+      const n = selected.length ? await importMissions(selected.map(r => addr[r.item.id] ? { ...r.mission, location: addr[r.item.id] } : r.mission)) : 0;
       // Les elements decoches ou masques sont marques ignores : la synchro auto ne les reprendra pas
       await saveMondayIds([...new Set([...mondayIds, ...rows.map(r => r.item.id)])]);
       await saveMondayConfig({ boardId, boardName: data.board.name, map, defaultTech, auto, updatedAt: new Date().toISOString(), updatedBy: me.id });
@@ -1181,14 +1198,21 @@ function MondayImport({ me, onClose, notify }) {
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div className="flex items-center gap-2 flex-wrap"><b style={{ fontSize: 14 }}>{m.title}</b><span className="m-pill" style={{ background: statusColor(m) }}>{statusText(m)}</span></div>
                   <div style={{ color: "var(--muted)" }}>
-                    <span style={{ color: r.noDate ? "#d97706" : "inherit" }}>{fmtRange(m)}{r.noDate ? " (date de création)" : ""}</span>{m.time ? ` · ${m.time}` : ""} · {m.location || <span style={{ color: "#d97706" }}>sans adresse</span>} · <span style={{ color: r.noTech ? "#d97706" : "inherit" }}>{userName(m.assignedTo)}</span>
+                    <span style={{ color: r.noDate ? "#d97706" : "inherit" }}>{fmtRange(m)}{r.noDate ? " (date de création)" : ""}</span>{m.time ? ` · ${m.time}` : ""} · {addr[r.item.id] || (m.location && !r.guessedPlace ? m.location : null) || <span style={{ color: "#d97706" }}>{r.guessedPlace ? "adresse déduite du nom" : "sans adresse"}</span>} · <span style={{ color: r.noTech ? "#d97706" : "inherit" }}>{userName(m.assignedTo)}</span>
                   </div>
+                  {(!m.location || r.guessedPlace) && (
+                    <select className="m-input" style={{ marginTop: 4, padding: "3px 6px", fontSize: 13, maxWidth: 420 }} value={addr[r.item.id] || ""} onClick={e => e.stopPropagation()} onChange={e => setAddr(x => ({ ...x, [r.item.id]: e.target.value }))}>
+                      <option value="">{r.guessedPlace ? `Adresse déduite : ${m.location}` : "Choisir l’adresse…"}</option>
+                      {addresses.map(a => <option key={a} value={a}>{a}</option>)}
+                    </select>
+                  )}
                 </div>
               </label>
             );
           })}
           {!shown.length && <div style={{ padding: 16, textAlign: "center", color: "var(--muted)", fontSize: 14 }}>Rien de nouveau dans ce tableau.</div>}
         </div>
+        {noPlace > 0 && <div style={{ background: "#fff4e5", color: "#8a5300", padding: "8px 12px", borderRadius: 6, fontSize: 13, marginTop: 8 }}>{noPlace} intervention{noPlace > 1 ? "s" : ""} sans adresse. {noPlace > 1 ? "Elles ne sortiront pas" : "Elle ne sortira pas"} dans le récap par société tant que l’adresse n’est pas choisie (ici ou plus tard dans l’intervention).</div>}
         <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 6 }}>En orange : valeur devinée (date de création, technicien par défaut) ou manquante. Les éléments décochés ou masqués seront ignorés définitivement. Les interventions importées sont déjà validées et restent modifiables dans l’app.</div>
       </>)}
     </Modal>
