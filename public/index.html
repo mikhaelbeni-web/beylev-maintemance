@@ -98,6 +98,12 @@ const USERS_KEY = "lv_users_v1";
 const USERS_TRASH_KEY = "users_trash";
 const HOSTAWAY_IDS_KEY = "hostaway_handled_ids";
 const HOSTAWAY_NOTIFS_KEY = "hostaway_notifications";
+/* Societes : [{ id, name, addresses: ["adresse exacte du champ location"] }]. Les missions ne sont pas modifiees. */
+const COMPANIES_KEY = "lv_companies_v1";
+const NO_COMPANY = "__none__";
+/* Monday : { boardId, boardName, map: { champ app: id colonne }, auto, defaultTech } et ids deja traites */
+const MONDAY_CONFIG_KEY = "monday_config";
+const MONDAY_IDS_KEY = "monday_handled_ids";
 const SESSION_KEY = "beylev_session_v2";
 const GESTION_EMAIL = "gestion@beylev.com";
 const TRASH_DAYS = 30;
@@ -166,6 +172,20 @@ const canSettings = u => u && (u.role === "admin" || u.adminAccess);
 const statusColor = m => (m.approved === false ? PENDING_COLOR : m.approved === "rejected" ? REJECTED_COLOR : (STATUS_BY_ID[m.status] || STATUS_BY_ID.todo).color);
 const statusText = m => (m.approved === false ? "En validation" : m.approved === "rejected" ? "Refusée" : (STATUS_BY_ID[m.status] || STATUS_BY_ID.todo).label);
 const tsOf = v => (typeof v === "number" ? v : new Date(v).getTime() || 0);
+/* Index adresse normalisee -> societe */
+const companyIndex = companies => { const idx = {}; companies.forEach(c => (c.addresses || []).forEach(a => { idx[norm(a)] = c; })); return idx; };
+const monthKeysBetween = (from, to) => {
+  const out = []; const d = parseYmd(from.slice(0, 7) + "-01"); const end = to.slice(0, 7);
+  while (ymd(d).slice(0, 7) <= end && out.length < 120) { out.push(monthKeyYM(d.getFullYear(), d.getMonth())); d.setMonth(d.getMonth() + 1); }
+  return out;
+};
+function downloadCsv(filename, rows) {
+  const esc = v => { const t = v === null || v === undefined ? "" : String(v); return /[";\n\r]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t; };
+  const csv = "\ufeff" + rows.map(r => r.map(esc).join(";")).join("\r\n");
+  const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+  const a = document.createElement("a"); a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
 
 function liveMonthKeys() {
   const now = new Date(); const keys = [];
@@ -210,6 +230,24 @@ async function writeMission(mission, previousDate) {
     tx.set(newRef, { v: JSON.stringify(obj) });
     if (oldRef) tx.set(oldRef, { v: JSON.stringify(withoutId(st.parse(oldSnap), m.id)) });
   });
+}
+/* Import groupe : une transaction par mois, ignore un element Monday deja present (deux appareils en meme temps) */
+async function importMissions(list) {
+  const byMonth = {};
+  list.forEach(m => { const k = monthKeyOf(m.date); (byMonth[k] = byMonth[k] || []).push(clean(m)); });
+  let added = 0;
+  for (const [k, items] of Object.entries(byMonth)) {
+    const ref = st.ref(k);
+    await db.runTransaction(async tx => {
+      const obj = normMonth(st.parse(await tx.get(ref)));
+      const known = new Set(Object.values(obj).flat().map(x => x && x.mondayId).filter(Boolean));
+      let n = 0;
+      items.forEach(m => { if (m.mondayId && known.has(m.mondayId)) return; (obj[m.date] = obj[m.date] || []).push(m); n++; });
+      tx.set(ref, { v: JSON.stringify(obj) });
+      added += n;
+    });
+  }
+  return added;
 }
 async function removeMissionHard(mission) {
   const ref = st.ref(monthKeyOf(mission.date));
@@ -309,6 +347,9 @@ function DataProvider({ children }) {
   const trashDoc = useDocValue(USERS_TRASH_KEY, []);
   const idsDoc = useDocValue(HOSTAWAY_IDS_KEY, []);
   const notifsDoc = useDocValue(HOSTAWAY_NOTIFS_KEY, []);
+  const companiesDoc = useDocValue(COMPANIES_KEY, []);
+  const mondayCfgDoc = useDocValue(MONDAY_CONFIG_KEY, null);
+  const mondayIdsDoc = useDocValue(MONDAY_IDS_KEY, []);
   const live = useLiveMissions();
   const [extra, setExtra] = useState({});
 
@@ -339,7 +380,16 @@ function DataProvider({ children }) {
   }, [fetchMonths]);
 
   const users = Array.isArray(usersDoc.value) && usersDoc.value.length ? usersDoc.value : DEFAULT_USERS;
+  const companies = useMemo(() => (Array.isArray(companiesDoc.value) ? companiesDoc.value : []), [companiesDoc.value]);
+  const companyByAddress = useMemo(() => companyIndex(companies), [companies]);
   const value = {
+    companies, companyOf: loc => companyByAddress[norm(loc)] || null,
+    saveCompanies: c => st.set(COMPANIES_KEY, clean(c)),
+    mondayConfig: mondayCfgDoc.value, mondayLoaded: mondayCfgDoc.loaded && mondayIdsDoc.loaded,
+    mondayIds: Array.isArray(mondayIdsDoc.value) ? mondayIdsDoc.value.map(String) : [],
+    saveMondayConfig: c => st.set(MONDAY_CONFIG_KEY, clean(c)),
+    saveMondayIds: ids => st.set(MONDAY_IDS_KEY, ids),
+    importMissions: async list => { const n = await importMissions(list); await fetchMonths([...new Set(list.map(m => monthKeyOf(m.date)))]); return n; },
     users, usersLoaded: usersDoc.loaded, usersTrash: Array.isArray(trashDoc.value) ? trashDoc.value : [],
     hostawayIds: Array.isArray(idsDoc.value) ? idsDoc.value.map(String) : [],
     hostawayNotifs: Array.isArray(notifsDoc.value) ? notifsDoc.value : [],
@@ -457,7 +507,7 @@ function PhotoThumb({ photo }) {
 }
 
 function MissionModal({ initial, me, onClose, notify }) {
-  const { users, save, hostawayNotifs, saveHostawayNotifs } = useData();
+  const { users, save, hostawayNotifs, saveHostawayNotifs, companyOf } = useData();
   const isNew = !initial.id;
   const isTech = me.role === "tech";
   const activeUsers = users;
@@ -595,6 +645,7 @@ function MissionModal({ initial, me, onClose, notify }) {
         {BUILDINGS_LIST.map(b => <option key={b} value={b}>{b === "CUSTOM" ? "Autre adresse…" : b}</option>)}
       </select>
       {locMode === "CUSTOM" && <input className="m-input" style={{ marginTop: 6 }} disabled={!canEditContent} value={m.location || ""} onChange={e => set("location", e.target.value)} placeholder="Adresse complète" />}
+      {companyOf(m.location) && <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 4 }}>Société : <b>{companyOf(m.location).name}</b></div>}
 
       <div className="grid grid-cols-2 gap-x-4">
         <div>
@@ -744,6 +795,7 @@ function MissionTable({ groups, me, onOpen, emptyText }) {
 function HomeScreen({ me, visible, onOpen, onNew, notify }) {
   const { missions, hostawayNotifs, saveHostawayNotifs } = useData();
   const [showImport, setShowImport] = useState(false);
+  const [showMonday, setShowMonday] = useState(false);
   const today = todayStr();
   const active = visible.filter(m => m.approved !== "rejected");
   const todays = active.filter(m => coversDay(m, today)).sort((a, b) => (a.time || "").localeCompare(b.time || ""));
@@ -771,6 +823,7 @@ function HomeScreen({ me, visible, onOpen, onNew, notify }) {
       <PageHeader title={`Bonjour ${String(me.name).split(" ")[0]} 👋`} subtitle={fmtDateLong(today)}
         actions={<>
           {me.role === "manager" && <button className="m-btn-sec" onClick={() => setShowImport(true)}><span className="inline-flex items-center gap-1"><Icon name="download" size={16} /> Import Hostaway</span></button>}
+          {me.role !== "tech" && <button className="m-btn-sec" onClick={() => setShowMonday(true)}><span className="inline-flex items-center gap-1"><Icon name="download" size={16} /> Import Monday</span></button>}
           {me.role !== "tech" && <button className="m-btn" onClick={() => onNew({})}><span className="inline-flex items-center gap-1"><Icon name="plus" size={16} /> Nouvelle intervention</span></button>}
         </>} />
       <div className="p-4 md:p-8 flex flex-col gap-6">
@@ -814,6 +867,7 @@ function HomeScreen({ me, visible, onOpen, onNew, notify }) {
           ]} />
       </div>
       {showImport && <HostawayImport me={me} onClose={() => setShowImport(false)} notify={notify} />}
+      {showMonday && <MondayImport me={me} onClose={() => setShowMonday(false)} notify={notify} />}
     </div>
   );
 }
@@ -948,6 +1002,199 @@ function HostawayImport({ me, onClose, notify }) {
 }
 
 /* ===================== PLANNING ===================== */
+/* ===================== MONDAY ===================== */
+const MONDAY_FIELDS = [
+  { id: "title", label: "Intervention", hint: "nom de l’élément par défaut", keys: [] },
+  { id: "location", label: "Adresse", keys: ["adresse", "lieu", "address", "location", "bien", "appartement", "immeuble"] },
+  { id: "date", label: "Date", keys: ["date", "echeance", "jour", "timeline", "chronologie", "planning", "due"] },
+  { id: "status", label: "Statut", keys: ["statut", "status", "etat"] },
+  { id: "assignee", label: "Technicien", keys: ["technicien", "personne", "assigne", "responsable", "owner", "people", "intervenant"] },
+  { id: "description", label: "Description", keys: ["description", "notes", "note", "detail", "commentaire", "probleme"] },
+  { id: "duration", label: "Durée (minutes)", keys: ["duree", "duration", "temps", "minutes"] }
+];
+const NAME_COL = "__name__";
+const fetchJson = url => fetch(url).then(r => r.json().then(j => { if (!r.ok) throw new Error(j.error || "HTTP " + r.status); return j; }));
+function guessMapping(columns) {
+  const map = { title: NAME_COL };
+  MONDAY_FIELDS.forEach(f => {
+    if (f.id === "title") return;
+    const c = columns.find(c => f.keys.some(k => norm(c.title).includes(k)) && c.type !== "subtasks");
+    if (c) map[f.id] = c.id;
+  });
+  return map;
+}
+function mondayStatus(text) {
+  const t = norm(text);
+  if (/termin|done|fait|fini|clos|realis/.test(t)) return "done";
+  if (/cours|working|progress|demarr/.test(t)) return "inprogress";
+  if (/annul|cancel/.test(t)) return "cancelled";
+  return "todo";
+}
+/* Transforme un element Monday en intervention. Une date absente prend la date de creation de l element. */
+function mondayToMission(item, map, users, defaultTech, me) {
+  const val = k => (map[k] === NAME_COL ? item.name : map[k] ? (item.values[map[k]] || "") : "").trim();
+  const dates = val("date").match(/\d{4}-\d{2}-\d{2}/g) || [];
+  const time = (val("date").match(/\b(\d{1,2}):(\d{2})\b/) || []).slice(1);
+  const created = item.createdAt ? ymd(new Date(item.createdAt)) : todayStr();
+  const who = val("assignee").split(",").map(norm).filter(Boolean)[0];
+  const tech = who && (users.find(u => norm(u.name) === who) || users.find(u => norm(u.name).includes(who) || who.includes(norm(u.name).split(" ")[0])));
+  const loc = val("location");
+  const m = {
+    id: uid(), mondayId: item.id, title: val("title") || item.name || "Élément Monday",
+    location: matchBuilding(loc) || loc, description: val("description"),
+    date: dates[0] || created, status: mondayStatus(val("status")), assignedTo: (tech || {}).id || defaultTech,
+    priority: "normal", duration: parseInt(val("duration"), 10) || 0, approved: true,
+    createdBy: me.id, createdAt: new Date().toISOString(), photos: [], comments: []
+  };
+  if (dates[1] && dates[1] > m.date) m.dateEnd = dates[1];
+  if (time.length) m.time = `${pad(time[0])}:${time[1]}`;
+  return { mission: m, noDate: !dates.length, noTech: !tech };
+}
+
+/* Synchro Monday -> app : les nouveaux elements du tableau sont importes a l ouverture puis toutes les 10 minutes */
+function useMondayAutoSync(me, notify) {
+  const { mondayConfig, mondayLoaded, mondayIds, saveMondayIds, missions, users, importMissions } = useData();
+  const latest = useRef({}); latest.current = { mondayIds, missions, users };
+  const running = useRef(false);
+  const enabled = !!(me && me.role !== "tech" && mondayLoaded && mondayConfig && mondayConfig.auto && mondayConfig.boardId);
+  useEffect(() => {
+    if (!enabled) return;
+    const run = async () => {
+      if (running.current) return; running.current = true;
+      try {
+        const { items } = await fetchJson(`/api/monday?action=items&board=${mondayConfig.boardId}`);
+        const { mondayIds, missions, users } = latest.current;
+        const known = new Set([...mondayIds, ...missions.map(m => m.mondayId).filter(Boolean)]);
+        const fresh = items.filter(it => !known.has(it.id));
+        if (!fresh.length) return;
+        const list = fresh.map(it => mondayToMission(it, mondayConfig.map || {}, users, mondayConfig.defaultTech, me).mission);
+        const n = await importMissions(list);
+        await saveMondayIds([...new Set([...mondayIds, ...fresh.map(it => it.id)])]);
+        if (n) notify(`${n} élément${n > 1 ? "s" : ""} Monday importé${n > 1 ? "s" : ""}`);
+      } catch (e) { console.warn("Synchro Monday", e); }
+      finally { running.current = false; }
+    };
+    run();
+    const t = setInterval(run, 10 * 60000);
+    return () => clearInterval(t);
+  }, [enabled, JSON.stringify(mondayConfig)]);
+}
+
+function MondayImport({ me, onClose, notify }) {
+  const { users, missions, mondayConfig, mondayIds, saveMondayConfig, saveMondayIds, importMissions } = useData();
+  const techs = users.filter(u => u.role === "tech");
+  const cfg = mondayConfig || {};
+  const [boards, setBoards] = useState(null);
+  const [boardId, setBoardId] = useState(cfg.boardId || "");
+  const [data, setData] = useState(null);
+  const [map, setMap] = useState(cfg.map || null);
+  const [defaultTech, setDefaultTech] = useState(cfg.defaultTech || (techs[0] || users[0] || {}).id);
+  const [auto, setAuto] = useState(cfg.auto !== false);
+  const [hideDone, setHideDone] = useState(false);
+  const [excluded, setExcluded] = useState({});
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => { fetchJson("/api/monday?action=boards").then(j => setBoards(j.boards)).catch(e => setError(e.message)); }, []);
+  useEffect(() => {
+    if (!boardId) return;
+    setData(null); setError("");
+    fetchJson(`/api/monday?action=items&board=${boardId}`).then(j => {
+      setData(j);
+      if (!map || boardId !== cfg.boardId) setMap(guessMapping(j.board.columns));
+    }).catch(e => setError(e.message));
+  }, [boardId]);
+
+  const known = new Set([...mondayIds, ...missions.map(m => m.mondayId).filter(Boolean)]);
+  const rows = data && map ? data.items.filter(it => !known.has(it.id)).map(it => ({ item: it, ...mondayToMission(it, map, users, defaultTech, me) })) : [];
+  const shown = rows.filter(r => !hideDone || r.mission.status !== "done");
+  const selected = shown.filter(r => !excluded[r.item.id]);
+  const already = data ? data.items.length - rows.length : 0;
+
+  async function submit() {
+    setBusy(true);
+    try {
+      const n = selected.length ? await importMissions(selected.map(r => r.mission)) : 0;
+      // Les elements decoches ou masques sont marques ignores : la synchro auto ne les reprendra pas
+      await saveMondayIds([...new Set([...mondayIds, ...rows.map(r => r.item.id)])]);
+      await saveMondayConfig({ boardId, boardName: data.board.name, map, defaultTech, auto, updatedAt: new Date().toISOString(), updatedBy: me.id });
+      notify(n ? `${n} intervention${n > 1 ? "s" : ""} importée${n > 1 ? "s" : ""} depuis Monday` : "Réglages Monday enregistrés");
+      onClose();
+    } catch (e) { notify("Erreur : " + e.message, true); }
+    setBusy(false);
+  }
+  const colOptions = data ? data.board.columns.filter(c => c.id !== "name") : [];
+  const userName = id => (users.find(u => u.id === id) || {}).name || "—";
+
+  return (
+    <Modal wide onClose={onClose} title="Import Monday"
+      footer={<>
+        <button className="m-btn-sec" onClick={onClose}>Annuler</button>
+        <button className="m-btn" disabled={busy || !data || !map} onClick={submit}>{selected.length ? `Importer ${selected.length} intervention${selected.length > 1 ? "s" : ""}` : "Enregistrer les réglages"}</button>
+      </>}>
+      <p style={{ color: "var(--muted)", fontSize: 14, marginTop: 0 }}>L’app lit votre tableau Monday sans jamais le modifier. Choisissez le tableau, vérifiez quelle colonne correspond à quoi, puis importez. Un élément déjà importé ne revient jamais.</p>
+      {error && <div style={{ background: "#ffebee", color: "#b00020", padding: 12, borderRadius: 6, marginBottom: 12, fontSize: 14 }}>{error}{/MONDAY_API_TOKEN/.test(error) && <div style={{ marginTop: 4 }}>Ajoutez le jeton Monday dans Vercel (Settings &gt; Environment Variables) puis redéployez.</div>}</div>}
+      <label className="m-label" style={{ marginTop: 0 }}>Tableau Monday</label>
+      <select className="m-input" value={boardId} onChange={e => { setBoardId(e.target.value); setExcluded({}); }}>
+        <option value="">{boards ? "Choisir un tableau…" : "Chargement des tableaux…"}</option>
+        {(boards || []).map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+        {!boards && cfg.boardId && <option value={cfg.boardId}>{cfg.boardName || cfg.boardId}</option>}
+      </select>
+
+      {boardId && !data && !error && <div style={{ padding: 20, textAlign: "center", color: "var(--muted)" }}>Lecture du tableau…</div>}
+      {data && map && (<>
+        <div style={{ fontWeight: 600, margin: "16px 0 4px" }}>Correspondance des colonnes</div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-3">
+          {MONDAY_FIELDS.map(f => (
+            <div key={f.id}>
+              <label className="m-label">{f.label}</label>
+              <select className="m-input" value={map[f.id] || ""} onChange={e => setMap(m => ({ ...m, [f.id]: e.target.value }))}>
+                <option value="">— Aucune —</option>
+                <option value={NAME_COL}>Nom de l’élément</option>
+                {colOptions.map(c => <option key={c.id} value={c.id}>{c.title}</option>)}
+              </select>
+            </div>
+          ))}
+          <div>
+            <label className="m-label">Technicien si non reconnu</label>
+            <select className="m-input" value={defaultTech} onChange={e => setDefaultTech(e.target.value)}>{users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}</select>
+          </div>
+        </div>
+        <label className="flex items-start gap-2" style={{ marginTop: 14, fontSize: 14, background: "#e5f4ff", padding: 10, borderRadius: 6 }}>
+          <input type="checkbox" checked={auto} onChange={e => setAuto(e.target.checked)} style={{ marginTop: 3 }} />
+          <span><b>Importer automatiquement les nouveaux éléments</b><br /><span style={{ color: "var(--muted)" }}>Chaque élément créé ensuite dans ce tableau arrive tout seul dans l’app (vérification à l’ouverture puis toutes les 10 minutes). Décochez quand l’équipe n’utilise plus Monday.</span></span>
+        </label>
+
+        <div className="flex items-center justify-between flex-wrap gap-2" style={{ margin: "16px 0 6px" }}>
+          <b>{rows.length} nouvel{rows.length > 1 ? "s" : ""} élément{rows.length > 1 ? "s" : ""}{already ? <span style={{ fontWeight: 400, color: "var(--muted)" }}> · {already} déjà importé{already > 1 ? "s" : ""} ou ignoré{already > 1 ? "s" : ""}</span> : null}</b>
+          <div className="flex items-center gap-3" style={{ fontSize: 13 }}>
+            <label className="flex items-center gap-1"><input type="checkbox" checked={hideDone} onChange={e => setHideDone(e.target.checked)} /> Masquer les terminés</label>
+            <button style={{ border: 0, background: "none", color: "#0073ea", padding: 0 }} onClick={() => setExcluded(Object.fromEntries(shown.map(r => [r.item.id, !selected.length ? false : true])))}>{selected.length ? "Tout décocher" : "Tout cocher"}</button>
+          </div>
+        </div>
+        <div style={{ border: "1px solid var(--border-soft)", borderRadius: 6, maxHeight: 360, overflowY: "auto" }}>
+          {shown.map(r => {
+            const m = r.mission; const off = !!excluded[r.item.id];
+            return (
+              <label key={r.item.id} className="flex items-start gap-2" style={{ padding: "8px 10px", fontSize: 13, cursor: "pointer", borderBottom: "1px solid var(--border-soft)", opacity: off ? 0.5 : 1 }}>
+                <input type="checkbox" checked={!off} onChange={() => setExcluded(x => ({ ...x, [r.item.id]: !off }))} style={{ marginTop: 3 }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div className="flex items-center gap-2 flex-wrap"><b style={{ fontSize: 14 }}>{m.title}</b><span className="m-pill" style={{ background: statusColor(m) }}>{statusText(m)}</span></div>
+                  <div style={{ color: "var(--muted)" }}>
+                    <span style={{ color: r.noDate ? "#d97706" : "inherit" }}>{fmtRange(m)}{r.noDate ? " (date de création)" : ""}</span>{m.time ? ` · ${m.time}` : ""} · {m.location || <span style={{ color: "#d97706" }}>sans adresse</span>} · <span style={{ color: r.noTech ? "#d97706" : "inherit" }}>{userName(m.assignedTo)}</span>
+                  </div>
+                </div>
+              </label>
+            );
+          })}
+          {!shown.length && <div style={{ padding: 16, textAlign: "center", color: "var(--muted)", fontSize: 14 }}>Rien de nouveau dans ce tableau.</div>}
+        </div>
+        <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 6 }}>En orange : valeur devinée (date de création, technicien par défaut) ou manquante. Les éléments décochés ou masqués seront ignorés définitivement. Les interventions importées sont déjà validées et restent modifiables dans l’app.</div>
+      </>)}
+    </Modal>
+  );
+}
+
 function PlanningScreen({ me, visible, onOpen, onNew }) {
   const { fetchMonths } = useData();
   const [view, setView] = useState("month");
@@ -1103,54 +1350,305 @@ function KanbanScreen({ me, visible, onOpen }) {
 }
 
 /* ===================== HISTORIQUE ===================== */
-function HistoryScreen({ me, visible, onOpen }) {
-  const { fetchMonths } = useData();
+/* Liste de toutes les adresses connues : liste fixe + adresses libres saisies dans les missions */
+function useAllAddresses() {
+  const { missions } = useData();
+  return useMemo(() => {
+    const seen = new Set(); const out = [];
+    const add = a => { const t = String(a || "").trim(); const k = norm(t); if (t && t !== "CUSTOM" && !seen.has(k)) { seen.add(k); out.push(t); } };
+    BUILDINGS_LIST.forEach(add);
+    missions.map(m => m.location).sort().forEach(add);
+    return out;
+  }, [missions]);
+}
+
+function MultiSelect({ label, allLabel, options, value, onChange }) {
+  const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
-  const [place, setPlace] = useState("");
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!open) return;
+    const h = e => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", h); document.addEventListener("touchstart", h);
+    return () => { document.removeEventListener("mousedown", h); document.removeEventListener("touchstart", h); };
+  }, [open]);
+  const shown = options.filter(o => !q || norm(o.label).includes(norm(q)));
+  const toggle = id => onChange(value.includes(id) ? value.filter(x => x !== id) : [...value, id]);
+  const text = !value.length ? allLabel : value.length === 1 ? (options.find(o => o.id === value[0]) || {}).label || "1 choix" : `${value.length} ${label}`;
+  return (
+    <div ref={ref} style={{ position: "relative" }}>
+      <button type="button" className="m-input" style={{ textAlign: "left", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 15, borderColor: value.length ? "var(--primary)" : undefined }} onClick={() => setOpen(o => !o)}>{text}</button>
+      {open && (
+        <div className="m-card fade-in" style={{ position: "absolute", zIndex: 50, top: "calc(100% + 4px)", left: 0, right: 0, minWidth: 260, maxHeight: 340, display: "flex", flexDirection: "column", boxShadow: "0 8px 24px rgba(0,0,0,.15)" }}>
+          <div style={{ padding: 8, borderBottom: "1px solid var(--border-soft)" }}>
+            <input className="m-input" autoFocus placeholder="Rechercher" value={q} onChange={e => setQ(e.target.value)} />
+            <div className="flex gap-3" style={{ marginTop: 6, fontSize: 13 }}>
+              <button type="button" style={{ border: 0, background: "none", color: "#0073ea", padding: 0 }} onClick={() => onChange([...new Set([...value, ...shown.map(o => o.id)])])}>Tout cocher</button>
+              <button type="button" style={{ border: 0, background: "none", color: "#0073ea", padding: 0 }} onClick={() => onChange([])}>Effacer</button>
+            </div>
+          </div>
+          <div style={{ overflowY: "auto" }}>
+            {shown.map(o => (
+              <label key={o.id} className="flex items-center gap-2" style={{ padding: "7px 10px", fontSize: 14, cursor: "pointer", borderBottom: "1px solid var(--border-soft)" }}>
+                <input type="checkbox" checked={value.includes(o.id)} onChange={() => toggle(o.id)} />
+                <span style={{ flex: 1, minWidth: 0 }}>{o.label}</span>
+                {o.hint && <span style={{ fontSize: 11, color: "var(--muted)" }}>{o.hint}</span>}
+              </label>
+            ))}
+            {!shown.length && <div style={{ padding: 12, fontSize: 13, color: "var(--muted)" }}>Aucun résultat</div>}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+const PERIODS = [
+  { id: "month", label: "Ce mois" },
+  { id: "prev", label: "Mois dernier" },
+  { id: "quarter", label: "3 derniers mois" },
+  { id: "year", label: "Cette année" }
+];
+function periodRange(id) {
+  const now = new Date(); const y = now.getFullYear(); const m = now.getMonth();
+  const last = (yy, mm) => ymd(new Date(yy, mm + 1, 0));
+  if (id === "month") return [ymd(new Date(y, m, 1)), last(y, m)];
+  if (id === "prev") return [ymd(new Date(y, m - 1, 1)), last(y, m - 1)];
+  if (id === "quarter") return [ymd(new Date(y, m - 2, 1)), last(y, m)];
+  if (id === "year") return [`${y}-01-01`, `${y}-12-31`];
+  return ["", ""];
+}
+const fmtMinutes = n => (!n ? "—" : n < 60 ? `${n} min` : `${Math.floor(n / 60)} h${n % 60 ? pad(n % 60) : ""}`);
+
+function HistoryScreen({ me, visible, onOpen }) {
+  const { fetchMonths, companies, companyOf, users } = useData();
+  const addresses = useAllAddresses();
+  const [q, setQ] = useState("");
   const [status, setStatus] = useState("");
-  const [month, setMonth] = useState("");
-  const monthOptions = useMemo(() => { const now = new Date(); const out = []; for (let i = 6; i >= -12; i--) { const d = new Date(now.getFullYear(), now.getMonth() + i, 1); out.push(monthKeyYM(d.getFullYear(), d.getMonth())); } return out; }, []);
-  useEffect(() => { fetchMonths(monthOptions); }, [fetchMonths, monthOptions]);
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const [selCompanies, setSelCompanies] = useState([]);
+  const [selAddresses, setSelAddresses] = useState([]);
+  const [groupBy, setGroupBy] = useState("month");
+  const canBill = me.role !== "tech";
+
+  const defaultMonths = useMemo(() => { const now = new Date(); const out = []; for (let i = 6; i >= -12; i--) { const d = new Date(now.getFullYear(), now.getMonth() + i, 1); out.push(monthKeyYM(d.getFullYear(), d.getMonth())); } return out; }, []);
+  useEffect(() => { fetchMonths(defaultMonths); }, [fetchMonths, defaultMonths]);
+  // Une periode hors de la fenetre par defaut charge les mois correspondants
+  useEffect(() => { if (from || to) fetchMonths(monthKeysBetween(from || to, to || from)); }, [from, to, fetchMonths]);
+
+  const companyIdOf = m => { const c = companyOf(m.location); return c ? c.id : NO_COMPANY; };
+  // Les adresses proposees se limitent aux societes cochees
+  const addressOptions = addresses
+    .filter(a => !selCompanies.length || selCompanies.includes((companyOf(a) || { id: NO_COMPANY }).id))
+    .map(a => ({ id: a, label: a, hint: (companyOf(a) || {}).name }));
+  const companyOptions = [...companies.map(c => ({ id: c.id, label: c.name, hint: `${(c.addresses || []).length} adr.` })).sort((a, b) => a.label.localeCompare(b.label)), { id: NO_COMPANY, label: "Sans société" }];
 
   const filtered = visible.filter(m => {
-    if (place === "CUSTOM" ? BUILDINGS_LIST.includes(m.location) : place && m.location !== place) return false;
+    if (selCompanies.length && !selCompanies.includes(companyIdOf(m))) return false;
+    if (selAddresses.length && !selAddresses.some(a => norm(a) === norm(m.location))) return false;
     if (status === "pending") { if (m.approved !== false) return false; }
     else if (status === "rejected") { if (m.approved !== "rejected") return false; }
     else if (status && (!isApproved(m) || (m.status || "todo") !== status)) return false;
-    if (month && monthKeyOf(m.date) !== month) return false;
-    if (q) { const s = norm(q); if (!norm([m.title, m.description, m.location, ...(m.comments || []).map(c => c.text)].join(" ")).includes(s)) return false; }
+    if (from && endOf(m) < from) return false;
+    if (to && m.date > to) return false;
+    if (q) { const s = norm(q); if (!norm([m.title, m.description, m.location, (companyOf(m.location) || {}).name, ...(m.comments || []).map(c => c.text)].join(" ")).includes(s)) return false; }
     return true;
   }).sort((a, b) => b.date.localeCompare(a.date));
 
   const groups = []; const map = {};
-  filtered.forEach(m => { const k = monthKeyOf(m.date); if (!map[k]) { map[k] = { key: k, title: monthLabelOfKey(k).replace(/^./, c => c.toUpperCase()), items: [] }; groups.push(map[k]); } map[k].items.push(m); });
+  filtered.forEach(m => {
+    let k, title;
+    if (groupBy === "company") { const c = companyOf(m.location); k = c ? c.id : NO_COMPANY; title = c ? c.name : "Sans société"; }
+    else if (groupBy === "address") { k = norm(m.location) || "_"; title = m.location || "Sans adresse"; }
+    else { k = monthKeyOf(m.date); title = monthLabelOfKey(k).replace(/^./, c => c.toUpperCase()); }
+    if (!map[k]) { map[k] = { key: k, title, items: [] }; groups.push(map[k]); }
+    map[k].items.push(m);
+  });
+  if (groupBy !== "month") groups.sort((a, b) => (a.key === NO_COMPANY) - (b.key === NO_COMPANY) || a.title.localeCompare(b.title));
+
+  // Recap par societe : interventions validees hors annulees et refusees
+  const billable = filtered.filter(m => isApproved(m) && m.status !== "cancelled");
+  const recap = Object.values(billable.reduce((acc, m) => {
+    const c = companyOf(m.location); const k = c ? c.id : NO_COMPANY;
+    const r = acc[k] || (acc[k] = { key: k, name: c ? c.name : "Sans société", n: 0, done: 0, minutes: 0, addresses: new Set() });
+    r.n++; if (m.status === "done") r.done++; r.minutes += Number(m.duration) || 0; r.addresses.add(norm(m.location));
+    return acc;
+  }, {})).sort((a, b) => (a.key === NO_COMPANY) - (b.key === NO_COMPANY) || b.n - a.n);
+
+  const activePeriod = PERIODS.find(p => { const [f, t] = periodRange(p.id); return f === from && t === to; });
+  const hasFilters = !!(q || status || from || to || selCompanies.length || selAddresses.length);
+  const reset = () => { setQ(""); setStatus(""); setFrom(""); setTo(""); setSelCompanies([]); setSelAddresses([]); };
+
+  function exportCsv() {
+    const userName = id => (users.find(u => u.id === id) || {}).name || "";
+    const rows = [["Date début", "Date fin", "Heure", "Société", "Adresse", "Intervention", "Description", "Statut", "Technicien", "Durée (min)", "Priorité", "Hostaway"]];
+    [...filtered].sort((a, b) => a.date.localeCompare(b.date)).forEach(m => rows.push([
+      m.date, endOf(m), m.time || "", (companyOf(m.location) || {}).name || "", m.location || "", m.title || "", (m.description || "").replace(/\s+/g, " ").trim(),
+      statusText(m), userName(m.assignedTo), Number(m.duration) || "", (PRIORITY_BY_ID[m.priority] || PRIORITY_BY_ID.normal).label.replace(/\s*⚠️/, ""), m.hostawayId ? "oui" : ""
+    ]));
+    const sel = companies.filter(c => selCompanies.includes(c.id)).map(c => norm(c.name).replace(/ /g, "-"));
+    const name = ["interventions", sel.length === 1 ? sel[0] : "", from || "debut", to || todayStr()].filter(Boolean).join("_");
+    downloadCsv(`${name}.csv`, rows);
+  }
 
   return (
     <div>
-      <PageHeader title="Historique" subtitle={`${filtered.length} intervention${filtered.length > 1 ? "s" : ""}`} />
+      <PageHeader title="Historique" subtitle={`${filtered.length} intervention${filtered.length > 1 ? "s" : ""}`}
+        actions={canBill && <button className="m-btn" disabled={!filtered.length} onClick={exportCsv}>Exporter CSV</button>} />
       <div className="p-4 md:p-8">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2" style={{ marginBottom: 16 }}>
-          <div style={{ position: "relative" }}>
-            <span style={{ position: "absolute", left: 10, top: 10, color: "var(--muted)" }}><Icon name="search" size={18} /></span>
-            <input className="m-input" style={{ paddingLeft: 34 }} placeholder="Rechercher" value={q} onChange={e => setQ(e.target.value)} />
+        <div className="flex flex-wrap gap-2 items-center" style={{ marginBottom: 10 }}>
+          {PERIODS.map(p => <button key={p.id} className={activePeriod && activePeriod.id === p.id ? "m-btn" : "m-btn-sec"} style={{ padding: "5px 12px" }} onClick={() => { const [f, t] = periodRange(p.id); setFrom(f); setTo(t); }}>{p.label}</button>)}
+          <div className="flex items-center gap-1" style={{ fontSize: 13, color: "var(--muted)" }}>
+            du <input type="date" className="m-input" style={{ width: 150, padding: "5px 8px" }} value={from} max={to || undefined} onChange={e => setFrom(e.target.value)} />
+            au <input type="date" className="m-input" style={{ width: 150, padding: "5px 8px" }} value={to} min={from || undefined} onChange={e => setTo(e.target.value)} />
           </div>
-          <select className="m-input" value={place} onChange={e => setPlace(e.target.value)}>
-            <option value="">Tous les lieux</option>
-            {BUILDINGS_LIST.map(b => <option key={b} value={b}>{b === "CUSTOM" ? "Autres adresses" : b}</option>)}
-          </select>
+          {hasFilters && <button style={{ border: 0, background: "none", color: "#0073ea", fontSize: 14 }} onClick={reset}>Effacer les filtres</button>}
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2" style={{ marginBottom: 16 }}>
+          <MultiSelect label="sociétés" allLabel="Toutes les sociétés" options={companyOptions} value={selCompanies} onChange={v => { setSelCompanies(v); setSelAddresses([]); }} />
+          <MultiSelect label="adresses" allLabel="Toutes les adresses" options={addressOptions} value={selAddresses} onChange={setSelAddresses} />
           <select className="m-input" value={status} onChange={e => setStatus(e.target.value)}>
             <option value="">Tous les statuts</option>
             {STATUSES.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
             {me.role !== "tech" && <option value="pending">En validation</option>}
             {me.role !== "tech" && <option value="rejected">Refusées</option>}
           </select>
-          <select className="m-input" value={month} onChange={e => setMonth(e.target.value)}>
-            <option value="">Tous les mois</option>
-            {monthOptions.map(k => <option key={k} value={k}>{monthLabelOfKey(k)}</option>)}
-          </select>
+          <div style={{ position: "relative" }}>
+            <span style={{ position: "absolute", left: 10, top: 10, color: "var(--muted)" }}><Icon name="search" size={18} /></span>
+            <input className="m-input" style={{ paddingLeft: 34 }} placeholder="Rechercher" value={q} onChange={e => setQ(e.target.value)} />
+          </div>
+        </div>
+
+        {canBill && recap.length > 0 && (
+          <div className="m-card" style={{ marginBottom: 20, overflow: "hidden" }}>
+            <div style={{ padding: "10px 14px", borderBottom: "1px solid var(--border-soft)", fontWeight: 600 }}>
+              Récap facturation <span style={{ fontWeight: 400, color: "var(--muted)", fontSize: 13 }}>· {from || to ? `${from ? fmtDate(from) : "début"} → ${to ? fmtDate(to) : "aujourd’hui"}` : "toute la période chargée"} · hors annulées, refusées et en validation</span>
+            </div>
+            <div className="m-scroll">
+              <table className="m-table" style={{ minWidth: 520 }}>
+                <thead><tr><th>Société</th><th>Interventions</th><th>Terminées</th><th>Adresses</th><th>Durée totale</th></tr></thead>
+                <tbody>
+                  {recap.map(r => (
+                    <tr key={r.key} style={{ cursor: "pointer" }} onClick={() => { setSelCompanies([r.key]); setSelAddresses([]); setGroupBy("address"); }}>
+                      <td className="m-name" style={{ fontWeight: 500, color: r.key === NO_COMPANY ? "var(--muted)" : "inherit" }}>{r.name}</td>
+                      <td>{r.n}</td><td>{r.done}</td><td>{r.addresses.size}</td><td>{fmtMinutes(r.minutes)}</td>
+                    </tr>
+                  ))}
+                  {recap.length > 1 && <tr><td className="m-name" style={{ fontWeight: 700 }}>Total</td><td style={{ fontWeight: 700 }}>{billable.length}</td><td style={{ fontWeight: 700 }}>{billable.filter(m => m.status === "done").length}</td><td></td><td style={{ fontWeight: 700 }}>{fmtMinutes(recap.reduce((s, r) => s + r.minutes, 0))}</td></tr>}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        <div className="flex items-center gap-1" style={{ marginBottom: 10, fontSize: 14 }}>
+          <span style={{ color: "var(--muted)", marginRight: 6 }}>Grouper par</span>
+          {[["month", "Mois"], ["company", "Société"], ["address", "Adresse"]].map(([id, l]) => <button key={id} className={"m-tab" + (groupBy === id ? " active" : "")} onClick={() => setGroupBy(id)}>{l}</button>)}
         </div>
         <MissionTable me={me} onOpen={onOpen} groups={groups} emptyText="Aucun résultat" />
       </div>
+    </div>
+  );
+}
+
+/* Societes : une adresse appartient a une seule societe */
+function CompaniesSettings({ notify }) {
+  const { companies, saveCompanies, companyOf } = useData();
+  const addresses = useAllAddresses();
+  const [edit, setEdit] = useState(null);
+  const [q, setQ] = useState("");
+  const [onlyFree, setOnlyFree] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [delTarget, setDelTarget] = useState(null);
+  const free = addresses.filter(a => !companyOf(a));
+
+  const open = c => { setQ(""); setOnlyFree(false); setEdit(c ? { ...c, addresses: [...(c.addresses || [])] } : { id: "c" + uid(), name: "", addresses: [], isNew: true }); };
+  const has = a => edit.addresses.some(x => norm(x) === norm(a));
+  const toggle = a => setEdit(e => ({ ...e, addresses: has(a) ? e.addresses.filter(x => norm(x) !== norm(a)) : [...e.addresses, a] }));
+  const shown = edit ? addresses.filter(a => (!q || norm(a).includes(norm(q))) && (!onlyFree || !companyOf(a) || has(a))) : [];
+
+  async function submit() {
+    const name = edit.name.trim();
+    if (!name) return notify("Donnez un nom à la société", true);
+    if (companies.some(c => c.id !== edit.id && norm(c.name) === norm(name))) return notify("Une société porte déjà ce nom", true);
+    const mine = new Set(edit.addresses.map(norm));
+    const rec = { id: edit.id, name, addresses: edit.addresses };
+    const others = companies.filter(c => c.id !== edit.id).map(c => ({ ...c, addresses: (c.addresses || []).filter(a => !mine.has(norm(a))) }));
+    const list = edit.isNew ? [...others, rec] : companies.map(c => c.id === edit.id ? rec : others.find(o => o.id === c.id));
+    setBusy(true);
+    try { await saveCompanies(list); notify(`${name} enregistrée (${edit.addresses.length} adresse${edit.addresses.length > 1 ? "s" : ""})`); setEdit(null); }
+    catch (e) { notify("Erreur : " + e.message, true); }
+    setBusy(false);
+  }
+  async function remove() {
+    setBusy(true);
+    try { await saveCompanies(companies.filter(c => c.id !== delTarget.id)); notify(`${delTarget.name} supprimée`); setDelTarget(null); setEdit(null); }
+    catch (e) { notify("Erreur : " + e.message, true); }
+    setBusy(false);
+  }
+
+  return (
+    <div>
+      <div className="flex items-center justify-between flex-wrap gap-2" style={{ marginBottom: 8 }}>
+        <h2 className="group-title" style={{ color: "#00c875", margin: 0 }}>Sociétés</h2>
+        <button className="m-btn" onClick={() => open(null)}>+ Nouvelle société</button>
+      </div>
+      <div className="m-card">
+        {!companies.length && <div style={{ padding: 16, color: "var(--muted)", fontSize: 14 }}>Aucune société. Créez-en une puis cochez ses adresses : l’historique pourra alors filtrer et totaliser par société.</div>}
+        {[...companies].sort((a, b) => a.name.localeCompare(b.name)).map(c => (
+          <div key={c.id} className="flex items-center gap-3" style={{ padding: "10px 14px", borderBottom: "1px solid var(--border-soft)", cursor: "pointer" }} onClick={() => open(c)}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <b>{c.name}</b> <span style={{ color: "var(--muted)", fontSize: 13 }}>· {(c.addresses || []).length} adresse{(c.addresses || []).length > 1 ? "s" : ""}</span>
+              <div style={{ fontSize: 12, color: "var(--muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{(c.addresses || []).join(" · ")}</div>
+            </div>
+            <button className="m-btn-sec" onClick={e => { e.stopPropagation(); open(c); }}>Modifier</button>
+          </div>
+        ))}
+      </div>
+      <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 6 }}>{free.length} adresse{free.length > 1 ? "s" : ""} sans société sur {addresses.length}.</div>
+
+      {edit && (
+        <Modal onClose={() => setEdit(null)} title={edit.isNew ? "Nouvelle société" : edit.name || "Société"}
+          footer={<>
+            {!edit.isNew && <button className="m-btn-danger" style={{ marginRight: "auto" }} onClick={() => setDelTarget(edit)}>Supprimer</button>}
+            <button className="m-btn-sec" onClick={() => setEdit(null)}>Annuler</button>
+            <button className="m-btn" disabled={busy} onClick={submit}>Enregistrer</button>
+          </>}>
+          <label className="m-label" style={{ marginTop: 0 }}>Nom de la société</label>
+          <input className="m-input" autoFocus={edit.isNew} value={edit.name} onChange={e => setEdit(x => ({ ...x, name: e.target.value }))} placeholder="Ex. SCI Saint Antoine" />
+          <div className="flex items-center justify-between flex-wrap gap-2" style={{ margin: "14px 0 6px" }}>
+            <b style={{ fontSize: 14 }}>Adresses ({edit.addresses.length} cochée{edit.addresses.length > 1 ? "s" : ""})</b>
+            <label className="flex items-center gap-2" style={{ fontSize: 13 }}><input type="checkbox" checked={onlyFree} onChange={e => setOnlyFree(e.target.checked)} /> Seulement sans société</label>
+          </div>
+          <input className="m-input" placeholder="Filtrer les adresses (ex. 75016, rue Saint)" value={q} onChange={e => setQ(e.target.value)} />
+          <div className="flex gap-3" style={{ margin: "6px 0", fontSize: 13 }}>
+            <button style={{ border: 0, background: "none", color: "#0073ea", padding: 0 }} onClick={() => setEdit(e => ({ ...e, addresses: [...e.addresses, ...shown.filter(a => !has(a))] }))}>Cocher les {shown.length} affichées</button>
+            <button style={{ border: 0, background: "none", color: "#0073ea", padding: 0 }} onClick={() => { const off = new Set(shown.map(norm)); setEdit(e => ({ ...e, addresses: e.addresses.filter(a => !off.has(norm(a))) })); }}>Décocher les affichées</button>
+          </div>
+          <div style={{ border: "1px solid var(--border-soft)", borderRadius: 6, maxHeight: 340, overflowY: "auto" }}>
+            {shown.map(a => {
+              const owner = companyOf(a);
+              const moving = owner && owner.id !== edit.id && has(a);
+              return (
+                <label key={a} className="flex items-center gap-2" style={{ padding: "8px 10px", fontSize: 14, cursor: "pointer", borderBottom: "1px solid var(--border-soft)" }}>
+                  <input type="checkbox" checked={has(a)} onChange={() => toggle(a)} />
+                  <span style={{ flex: 1, minWidth: 0 }}>{a}</span>
+                  {owner && owner.id !== edit.id && <span style={{ fontSize: 11, color: moving ? "#d97706" : "var(--muted)", whiteSpace: "nowrap" }}>{moving ? `retirée de ${owner.name}` : owner.name}</span>}
+                </label>
+              );
+            })}
+            {!shown.length && <div style={{ padding: 12, fontSize: 13, color: "var(--muted)" }}>Aucune adresse</div>}
+          </div>
+          <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 6 }}>Une adresse appartient à une seule société : la cocher ici la retire de son ancienne société.</div>
+        </Modal>
+      )}
+      {delTarget && (
+        <Modal onClose={() => setDelTarget(null)} title={`Supprimer ${delTarget.name} ?`}
+          footer={<><button className="m-btn-sec" onClick={() => setDelTarget(null)}>Annuler</button><button className="m-btn-danger" disabled={busy} onClick={remove}>Supprimer</button></>}>
+          <p style={{ fontSize: 14 }}>Ses adresses repasseront « sans société ». Les interventions ne sont pas touchées.</p>
+        </Modal>
+      )}
     </div>
   );
 }
@@ -1223,8 +1721,9 @@ function SettingsScreen({ me, notify }) {
 
   return (
     <div>
-      <PageHeader title="Réglages" subtitle="Utilisateurs, corbeille et Hostaway" />
+      <PageHeader title="Réglages" subtitle="Utilisateurs, sociétés, corbeille et Hostaway" />
       <div className="p-4 md:p-8 flex flex-col gap-6">
+        <CompaniesSettings notify={notify} />
         <div>
           <div className="flex items-center justify-between flex-wrap gap-2" style={{ marginBottom: 8 }}>
             <h2 className="group-title" style={{ color: "#0073ea", margin: 0 }}>Utilisateurs</h2>
@@ -1377,6 +1876,8 @@ function Shell() {
 
   const login = u => { const s = { id: u.id, username: u.username, role: u.role, ts: Date.now() }; try { localStorage.setItem(SESSION_KEY, JSON.stringify(s)); } catch (e) { } setSession(s); setTab("home"); };
   const logout = () => { try { localStorage.removeItem(SESSION_KEY); } catch (e) { } setSession(null); };
+
+  useMondayAutoSync(me, notify);
 
   if (!me) return <LoginScreen onLogin={login} />;
 
