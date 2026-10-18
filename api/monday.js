@@ -1,4 +1,4 @@
-// Monday.com - proxy en lecture seule vers l API GraphQL
+// Monday.com - proxy en LECTURE SEULE vers l API GraphQL (aucune mutation n est envoyee, voir gql)
 // Le jeton est lu dans les variables d environnement Vercel, jamais expose au frontend
 //   GET /api/monday?action=boards          -> tableaux et colonnes
 //   GET /api/monday?action=items&board=ID  -> tous les elements du tableau
@@ -6,6 +6,8 @@ const MONDAY_API_TOKEN = process.env.MONDAY_API_TOKEN;
 const ITEM_FIELDS = "id name created_at updated_at group { title } column_values { id text type }";
 
 async function gql(query, variables) {
+  // Garde-fou : ce proxy ne sert qu a lire. Toute requete qui ne soit pas un "query" est refusee avant d appeler Monday.
+  if (!/^\s*query\b/.test(query) || /\bmutation\b|\bsubscription\b/i.test(query)) throw Object.assign(new Error("Requete Monday refusee : lecture seule"), { status: 500 });
   if (!MONDAY_API_TOKEN) throw Object.assign(new Error("MONDAY_API_TOKEN manquante dans les variables Vercel"), { status: 500 });
   const r = await fetch("https://api.monday.com/v2", {
     method: "POST",
@@ -48,6 +50,7 @@ async function boardItems(boardId) {
 
 module.exports = async (req, res) => {
   res.setHeader("Cache-Control", "no-store");
+  if (req.method !== "GET") return res.status(405).json({ error: "Lecture seule : GET uniquement" });
   try {
     const action = req.query.action || "boards";
     if (action === "boards") {
