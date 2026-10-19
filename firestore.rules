@@ -1,0 +1,39 @@
+rules_version = '2';
+
+// Regles a publier dans la console Firebase (Firestore > Regles) UNIQUEMENT quand :
+//   1. la version Firebase Auth de l'app est en production,
+//   2. chaque utilisateur s'est reconnecte une fois (Reglages : "Compte de connexion securise actif").
+// Avant cela, l'ancienne version de l'app (sans connexion Firebase) serait bloquee.
+//
+// Les fonctions api/ utilisent le compte de service et ne sont pas concernees par ces regles.
+//
+// Limite connue : les interventions sont stockees par mois (un document contient toutes les
+// interventions du mois), donc les regles ne peuvent pas restreindre un technicien a ses seules
+// interventions. Il faudrait pour cela un document par intervention.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Utilisateur connecte ET rattache a l'application (claim pose par le serveur).
+    function member() {
+      return request.auth != null && request.auth.token.appUserId is string;
+    }
+    function settings() {
+      return member() && (request.auth.token.role == 'admin' || request.auth.token.settings == true);
+    }
+
+    match /app_data/{docId} {
+      allow read: if member();
+      // Liste des comptes et sauvegardes : ecrites uniquement par le serveur (api/admin-users, api/healthcheck).
+      allow write: if member()
+        && !(docId in ['lv_users_v1', 'users_backups'])
+        && (docId != 'users_trash' || settings());
+    }
+
+    match /app_photos/{photoId} {
+      allow read, write: if member();
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

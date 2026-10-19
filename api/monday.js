@@ -1,7 +1,9 @@
 // Monday.com - proxy en lecture seule vers l API GraphQL
 // Le jeton est lu dans les variables d environnement Vercel, jamais expose au frontend
+// Reserve aux admins et managers connectes (jeton Firebase)
 //   GET /api/monday?action=boards          -> tableaux et colonnes
 //   GET /api/monday?action=items&board=ID  -> tous les elements du tableau
+const fb = require("./_lib/firebase");
 const MONDAY_API_TOKEN = process.env.MONDAY_API_TOKEN;
 const ITEM_FIELDS = "id name created_at updated_at group { title } column_values { id text type }";
 
@@ -49,6 +51,7 @@ async function boardItems(boardId) {
 module.exports = async (req, res) => {
   res.setHeader("Cache-Control", "no-store");
   try {
+    await fb.requireUser(req, { roles: ["admin", "manager"] });
     const action = req.query.action || "boards";
     if (action === "boards") {
       const d = await gql("query { boards(limit: 200, state: active) { id name columns { id title type } } }");
