@@ -17,12 +17,19 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const WEB_API_KEY = process.env.FIREBASE_WEB_API_KEY || "AIzaSyB7i6PnqFAdBuGuFM84BKGYWwRT0P8GClc";
 
 let serviceAccount = null;
+/* Accepte le JSON brut (eventuellement entoure de guillemets ou d'espaces) ou sa version base64. */
+function parseServiceAccount(raw) {
+  const tryJson = t => { try { let v = JSON.parse(t); if (typeof v === "string") v = JSON.parse(v); return v && typeof v === "object" ? v : null; } catch (e) { return null; } };
+  const t = String(raw).trim().replace(/^'([\s\S]*)'$/, "$1");
+  const v = tryJson(t) || tryJson(Buffer.from(t, "base64").toString("utf8"));
+  if (!v || !v.private_key || !v.client_email) throw Object.assign(new Error("FIREBASE_SERVICE_ACCOUNT illisible : collez le contenu complet du fichier JSON de la cle (de { a })"), { status: 500 });
+  return v;
+}
 function getServiceAccount() {
   if (serviceAccount) return serviceAccount;
   const raw = process.env.FIREBASE_SERVICE_ACCOUNT;
   if (!raw) throw Object.assign(new Error("FIREBASE_SERVICE_ACCOUNT manquante dans les variables Vercel"), { status: 500 });
-  const text = raw.trim().startsWith("{") ? raw : Buffer.from(raw, "base64").toString("utf8");
-  serviceAccount = JSON.parse(text);
+  serviceAccount = parseServiceAccount(raw);
   return serviceAccount;
 }
 
