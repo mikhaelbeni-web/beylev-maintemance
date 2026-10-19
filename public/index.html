@@ -156,6 +156,8 @@ const clean = o => JSON.parse(JSON.stringify(o));
 const fmtDate = s => { if (!s) return "—"; const d = parseYmd(s); return `${pad(d.getDate())} ${MONTHS[d.getMonth()].slice(0, 4)}.`; };
 const fmtDateLong = s => { if (!s) return "—"; const d = parseYmd(s); return d.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long", year: "numeric" }); };
 const fmtRange = m => m.dateEnd && m.dateEnd !== m.date ? `${fmtDate(m.date)} → ${fmtDate(m.dateEnd)}` : fmtDate(m.date);
+/* Texte insere dans le HTML des emails (titres, adresses et descriptions viennent aussi de Hostaway et Monday). */
+const escHtml = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 const norm = s => String(s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/g, " ").trim();
 const initialsOf = u => (u && (u.initials || String(u.name || "?").split(/\s+/).map(x => x[0]).join("").slice(0, 2))).toUpperCase();
 const colorOf = u => { if (!u) return "#c4c4c4"; if (u.color) return u.color; let h = 0; for (const c of String(u.id)) h = (h * 31 + c.charCodeAt(0)) >>> 0; return USER_COLORS[h % USER_COLORS.length]; };
@@ -176,7 +178,8 @@ const monthKeysBetween = (from, to) => {
   return out;
 };
 function downloadCsv(filename, rows) {
-  const esc = v => { const t = v === null || v === undefined ? "" : String(v); return /[";\n\r]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t; };
+  // Une cellule texte qui commence par = + - @ serait executee comme formule par Excel : on la prefixe d une apostrophe.
+  const esc = v => { let t = v === null || v === undefined ? "" : String(v); if (typeof v === "string" && /^[=+\-@\t\r]/.test(t)) t = "'" + t; return /[";\n\r]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t; };
   const csv = "\ufeff" + rows.map(r => r.map(esc).join(";")).join("\r\n");
   const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
   const a = document.createElement("a"); a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
@@ -210,8 +213,10 @@ function withoutId(obj, id) {
   return out;
 }
 
-/* Ecrit toujours dans le doc du mois de la mission (et la retire de l ancien mois si la date a change). */
-async function writeMission(mission, previousDate) {
+const CHANGED_MSG = "Cette intervention a été modifiée ou supprimée par quelqu’un d’autre entre-temps : fermez la fiche et rouvrez-la.";
+/* Ecrit toujours dans le doc du mois de la mission (et la retire de l ancien mois si la date a change).
+   expect = { updatedAt } de la version ouverte : refuse d ecraser une version modifiee entre-temps par un autre appareil. */
+async function writeMission(mission, previousDate, expect) {
   const m = clean(mission); delete m._mk;
   if (!m.date) throw new Error("Date manquante");
   const newKey = monthKeyOf(m.date);
@@ -221,11 +226,35 @@ async function writeMission(mission, previousDate) {
   await db.runTransaction(async tx => {
     const newSnap = await tx.get(newRef);
     const oldSnap = oldRef ? await tx.get(oldRef) : null;
+    if (expect) {
+      const cur = flattenMonth(st.parse(oldRef ? oldSnap : newSnap)).find(x => x.id === m.id);
+      if (!cur || (cur.updatedAt || "") !== (expect.updatedAt || "")) throw new Error(CHANGED_MSG);
+    }
     const obj = withoutId(st.parse(newSnap), m.id);
     obj[m.date] = [...(obj[m.date] || []), m];
     tx.set(newRef, { v: JSON.stringify(obj) });
     if (oldRef) tx.set(oldRef, { v: JSON.stringify(withoutId(st.parse(oldSnap), m.id)) });
   });
+}
+/* Modifie une intervention a partir de sa version en base (statut, commentaire, photo, corbeille) :
+   les modifications faites entre-temps par un autre appareil sont conservees. fn ne doit pas changer la date. */
+async function patchMission(id, date, fn) {
+  const ref = st.ref(monthKeyOf(date));
+  let out = null;
+  await db.runTransaction(async tx => {
+    const obj = normMonth(st.parse(await tx.get(ref)));
+    out = null;
+    for (const [d, list] of Object.entries(obj)) {
+      const i = (list || []).findIndex(x => x && x.id === id);
+      if (i < 0) continue;
+      out = { ...fn(list[i]), updatedAt: new Date().toISOString() };
+      obj[d] = list.map((x, j) => (j === i ? out : x));
+      break;
+    }
+    if (!out) throw new Error(CHANGED_MSG);
+    tx.set(ref, { v: JSON.stringify(obj) });
+  });
+  return out;
 }
 /* Import groupe : une transaction par mois, ignore un element Monday deja present (deux appareils en meme temps) */
 async function importMissions(list) {
@@ -278,15 +307,15 @@ function missionEmailHtml(m, intro, users) {
   const a = users.find(u => u.id === m.assignedTo);
   const c = users.find(u => u.id === m.createdBy);
   return `<div style="font-family:Arial,sans-serif;color:#323338">
-    <p>${intro}</p>
+    <p>${escHtml(intro)}</p>
     <table style="border-collapse:collapse;font-size:14px">
-      <tr><td style="padding:4px 12px 4px 0;color:#676879">Intervention</td><td><b>${m.title || ""}</b></td></tr>
-      <tr><td style="padding:4px 12px 4px 0;color:#676879">Lieu</td><td>${m.location || "Non précisé"}</td></tr>
+      <tr><td style="padding:4px 12px 4px 0;color:#676879">Intervention</td><td><b>${escHtml(m.title)}</b></td></tr>
+      <tr><td style="padding:4px 12px 4px 0;color:#676879">Lieu</td><td>${escHtml(m.location || "Non précisé")}</td></tr>
       <tr><td style="padding:4px 12px 4px 0;color:#676879">Date</td><td>${fmtDateLong(m.date)}${m.dateEnd && m.dateEnd !== m.date ? " au " + fmtDateLong(m.dateEnd) : ""}${m.time ? " à " + m.time : ""}</td></tr>
       <tr><td style="padding:4px 12px 4px 0;color:#676879">Priorité</td><td>${m.priority === "urgent" ? "URGENT" : "Normale"}</td></tr>
-      <tr><td style="padding:4px 12px 4px 0;color:#676879">Assigné à</td><td>${a ? a.name : "—"}</td></tr>
-      <tr><td style="padding:4px 12px 4px 0;color:#676879">Créé par</td><td>${c ? c.name : "—"}</td></tr>
-      <tr><td style="padding:4px 12px 4px 0;color:#676879;vertical-align:top">Description</td><td>${(m.description || "—").replace(/\n/g, "<br>")}</td></tr>
+      <tr><td style="padding:4px 12px 4px 0;color:#676879">Assigné à</td><td>${escHtml(a ? a.name : "—")}</td></tr>
+      <tr><td style="padding:4px 12px 4px 0;color:#676879">Créé par</td><td>${escHtml(c ? c.name : "—")}</td></tr>
+      <tr><td style="padding:4px 12px 4px 0;color:#676879;vertical-align:top">Description</td><td>${escHtml(m.description || "—").replace(/\n/g, "<br>")}</td></tr>
     </table>
     <p style="margin-top:16px"><a href="${location.origin}" style="background:#0073ea;color:#fff;padding:8px 16px;border-radius:4px;text-decoration:none">Ouvrir le planning</a></p>
   </div>`;
@@ -378,10 +407,15 @@ function DataProvider({ children }) {
   const missions = useMemo(() => allMissions.filter(m => !m.deletedAt), [allMissions]);
   const deletedMissions = useMemo(() => allMissions.filter(m => m.deletedAt), [allMissions]);
 
-  const save = useCallback(async (m, prevDate) => {
-    await writeMission(m, prevDate);
+  const save = useCallback(async (m, prevDate, expect) => {
+    await writeMission(m, prevDate, expect);
     const touched = [monthKeyOf(m.date)]; if (prevDate) touched.push(monthKeyOf(prevDate));
     await fetchMonths(touched);
+  }, [fetchMonths]);
+  const patch = useCallback(async (m, fn) => {
+    const out = await patchMission(m.id, m.date, fn);
+    await fetchMonths([monthKeyOf(m.date)]);
+    return out;
   }, [fetchMonths]);
 
   /* Les anciens mots de passe ne doivent jamais circuler dans l app. */
@@ -399,7 +433,7 @@ function DataProvider({ children }) {
     users, usersLoaded: usersDoc.loaded, usersTrash: Array.isArray(trashDoc.value) ? trashDoc.value : [],
     hostawayIds: Array.isArray(idsDoc.value) ? idsDoc.value.map(String) : [],
     hostawayNotifs: Array.isArray(notifsDoc.value) ? notifsDoc.value : [],
-    missions, deletedMissions, liveStatus: live.status, liveKeys: live.keys, fetchMonths, save,
+    missions, deletedMissions, liveStatus: live.status, liveKeys: live.keys, fetchMonths, save, patch,
     usersError: usersDoc.error, usersFromServer: !!usersDoc.fromServer,
     saveUsersTrash: t => st.set(USERS_TRASH_KEY, clean(t)),
     saveHostawayIds: ids => st.set(HOSTAWAY_IDS_KEY, ids),
@@ -508,19 +542,27 @@ function PhotoThumb({ photo }) {
     db.collection(PHOTOS).doc(photo.id).get().then(d => { if (alive && d.exists) setSrc(d.data().b); }).catch(() => {});
     return () => { alive = false; };
   }, [photo.id]);
+  const [big, setBig] = useState(false);
+  // Seule une image en data: est affichee, agrandie dans l app (un lien vers une URL data: est bloque par Chrome,
+  // et une autre URL dans un lien pourrait executer du code). Du base64 sans en-tete est traite comme du JPEG.
+  const img = typeof src !== "string" ? null : src.startsWith("data:image/") ? src : /^[A-Za-z0-9+/=\s]+$/.test(src) ? "data:image/jpeg;base64," + src : null;
   if (!src) return <div style={{ width: 72, height: 72, borderRadius: 6, background: "var(--surface-2)", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--muted)", fontSize: 12 }}>…</div>;
-  return <a href={src} target="_blank" rel="noreferrer"><img src={src} alt="" style={{ width: 72, height: 72, objectFit: "cover", borderRadius: 6, border: "1px solid var(--border-soft)" }} /></a>;
+  if (!img) return null;
+  return (
+    <>
+      <img src={img} alt="" onClick={() => setBig(true)} style={{ width: 72, height: 72, objectFit: "cover", borderRadius: 6, border: "1px solid var(--border-soft)", cursor: "zoom-in" }} />
+      {big && <div onClick={() => setBig(false)} style={{ position: "fixed", inset: 0, zIndex: 90, background: "rgba(0,0,0,.85)", display: "flex", alignItems: "center", justifyContent: "center", padding: 12, cursor: "zoom-out" }}><img src={img} alt="" style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }} /></div>}
+    </>
+  );
 }
 
 function MissionModal({ initial, me, onClose, notify }) {
-  const { users, save, hostawayNotifs, saveHostawayNotifs, companyOf } = useData();
+  const { users, save, patch, hostawayNotifs, saveHostawayNotifs, companyOf } = useData();
   const isNew = !initial.id;
   const isTech = me.role === "tech";
-  const activeUsers = users;
-  const [m, setM] = useState(() => {
-    const base = { status: "todo", priority: "normal", title: TASK_TYPES[0], location: BUILDINGS_LIST[0], date: todayStr(), assignedTo: (users.find(u => u.role === "tech") || users[0] || {}).id || "", photos: [], comments: [], ...initial };
-    return base;
-  });
+  const [m, setM] = useState(() => ({ status: "todo", priority: "normal", title: TASK_TYPES[0], location: BUILDINGS_LIST[0], date: todayStr(), assignedTo: (users.find(u => u.role === "tech") || users[0] || {}).id || "", photos: [], comments: [], ...initial }));
+  /* Version en base sur laquelle la fiche s appuie : un enregistrement complet est refuse si quelqu un l a modifiee entre-temps. */
+  const baseUpdatedAt = useRef(initial.updatedAt);
   const [titleMode, setTitleMode] = useState(() => (!initial.title || TASK_TYPES.includes(initial.title) ? (initial.title || TASK_TYPES[0]) : "CUSTOM"));
   const [locMode, setLocMode] = useState(() => (!initial.location ? BUILDINGS_LIST[0] : BUILDINGS_LIST.includes(initial.location) ? initial.location : "CUSTOM"));
   const [busy, setBusy] = useState(false);
@@ -533,9 +575,14 @@ function MissionModal({ initial, me, onClose, notify }) {
   const canDelete = isStrictAdmin(me) || (me.role === "manager" && m.approved === false && m.createdBy === me.id);
   const canChangeStatus = !isTech || m.assignedTo === me.id;
 
-  async function persist(rec, msg) {
-    await save(rec, isNew ? null : initial.date);
-    if (msg) notify(msg);
+  const saveFull = rec => save(rec, isNew ? null : initial.date, isNew ? null : { updatedAt: baseUpdatedAt.current });
+  /* Statut, commentaire, photo : modification ciblee sur la version en base, sans toucher aux champs en cours d edition. */
+  async function patchFields(fn, fields) {
+    const cur = await patch({ id: initial.id, date: initial.date }, fn);
+    baseUpdatedAt.current = cur.updatedAt;
+    // Fiche en lecture seule (technicien) : on affiche toute la version en base ; sinon on garde les champs en cours d edition.
+    setM(p => { if (!canEditContent) return cur; const n = { ...p, updatedAt: cur.updatedAt }; fields.forEach(k => { n[k] = cur[k]; }); return n; });
+    return cur;
   }
 
   async function submit() {
@@ -547,7 +594,7 @@ function MissionModal({ initial, me, onClose, notify }) {
       let rec = { ...m, title: m.title.trim(), location: m.location.trim(), description: (m.description || "").trim(), updatedAt: new Date().toISOString() };
       if (!rec.dateEnd || rec.dateEnd === rec.date) delete rec.dateEnd;
       if (isNew) { rec.id = uid(); rec.createdAt = new Date().toISOString(); rec.createdBy = me.id; rec.approved = isStrictAdmin(me); }
-      await persist(rec);
+      await saveFull(rec);
       if (isNew && !rec.approved) {
         const admins = users.filter(u => isStrictAdmin(u) && u.email).map(u => u.email);
         sendEmail(admins, `[Beylev] Intervention à valider : ${rec.title}`, missionEmailHtml(rec, `${me.name} a soumis une intervention à valider.`, users));
@@ -565,8 +612,8 @@ function MissionModal({ initial, me, onClose, notify }) {
   async function validate() {
     setBusy(true);
     try {
-      const rec = { ...m, approved: true, approvedBy: me.id, approvedAt: new Date().toISOString() };
-      await save(rec, initial.date);
+      const rec = { ...m, approved: true, approvedBy: me.id, approvedAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+      await saveFull(rec);
       const a = users.find(u => u.id === rec.assignedTo);
       if (a && a.email) sendEmail(a.email, `[Beylev] Intervention validée : ${rec.title}`, missionEmailHtml(rec, "Votre intervention a été validée et vous est assignée.", users));
       if (rec.hostawayId) {
@@ -581,40 +628,44 @@ function MissionModal({ initial, me, onClose, notify }) {
   }
   async function reject() {
     setBusy(true);
-    try { await save({ ...m, approved: "rejected" }, initial.date); notify("Intervention refusée"); onClose(); }
+    try { await patch(initial, cur => ({ ...cur, approved: "rejected" })); notify("Intervention refusée"); onClose(); }
     catch (e) { notify("Erreur : " + e.message, true); }
     setBusy(false);
   }
   async function softDelete() {
     setBusy(true);
-    try { await save({ ...m, deletedAt: new Date().toISOString(), deletedBy: me.id }, initial.date); notify("Intervention placée dans la corbeille (30 jours)"); onClose(); }
+    try { await patch(initial, cur => ({ ...cur, deletedAt: new Date().toISOString(), deletedBy: me.id })); notify("Intervention placée dans la corbeille (30 jours)"); onClose(); }
     catch (e) { notify("Erreur : " + e.message, true); }
     setBusy(false);
   }
   async function addPhotos(e) {
     const files = Array.from(e.target.files || []); e.target.value = "";
-    let photos = [...(m.photos || [])];
+    const added = [];
     for (const f of files) {
       try {
         const data = await compressImage(f);
         const id = uid();
         await db.collection(PHOTOS).doc(id).set({ b: data });
-        photos = [...photos, { id }];
+        added.push({ id });
       } catch (err) { notify("Photo non enregistrée : " + err.message, true); }
     }
-    const rec = { ...m, photos }; setM(rec);
-    if (!isNew) { try { await save(rec, initial.date); notify("Photo ajoutée"); } catch (err) { notify("Erreur : " + err.message, true); } }
+    if (!added.length) return;
+    if (isNew) return setM(p => ({ ...p, photos: [...(p.photos || []), ...added] }));
+    try { await patchFields(cur => ({ ...cur, photos: [...(cur.photos || []), ...added] }), ["photos"]); notify(added.length > 1 ? "Photos ajoutées" : "Photo ajoutée"); }
+    catch (err) { notify("Erreur : " + err.message, true); }
   }
   async function addComment() {
     if (!comment.trim()) return;
     const c = { id: uid(), text: comment.trim(), author: me.name, authorId: me.id, createdAt: new Date().toISOString() };
-    const rec = { ...m, comments: [...(m.comments || []), c] }; setM(rec); setComment("");
-    if (!isNew) { try { await save(rec, initial.date); } catch (err) { notify("Erreur : " + err.message, true); } }
+    setComment("");
+    try { await patchFields(cur => ({ ...cur, comments: [...(cur.comments || []), c] }), ["comments"]); }
+    catch (err) { setComment(c.text); notify("Erreur : " + err.message, true); }
   }
   const statusOnly = async sid => {
     if (!canChangeStatus) return;
-    const rec = { ...m, status: sid }; setM(rec);
-    if (!isNew) { try { await save(rec, initial.date); notify("Statut mis à jour"); } catch (e) { notify("Erreur : " + e.message, true); } }
+    if (isNew) return set("status", sid);
+    try { await patchFields(cur => ({ ...cur, status: sid }), ["status"]); notify("Statut mis à jour"); }
+    catch (e) { notify("Erreur : " + e.message, true); }
   };
 
   const footer = (
@@ -673,7 +724,7 @@ function MissionModal({ initial, me, onClose, notify }) {
         <div>
           <label className="m-label">Assigné à</label>
           <select className="m-input" value={m.assignedTo || ""} disabled={!canEditContent} onChange={e => set("assignedTo", e.target.value)}>
-            {activeUsers.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+            {users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
           </select>
         </div>
         <div>
@@ -731,9 +782,9 @@ function MissionModal({ initial, me, onClose, notify }) {
 
 /* ===================== TABLEAU (vue principale facon monday) ===================== */
 function MissionTable({ groups, me, onOpen, emptyText }) {
-  const { users, save } = useData();
+  const { users, patch } = useData();
   const [collapsed, setCollapsed] = useState({});
-  const changeStatus = async (m, s) => { try { await save({ ...m, status: s }, m.date); } catch (e) { alert(e.message); } };
+  const changeStatus = async (m, s) => { try { await patch(m, cur => ({ ...cur, status: s })); } catch (e) { alert(e.message); } };
   if (!groups.some(g => g.items.length)) return <div className="m-card" style={{ padding: 32, textAlign: "center", color: "var(--muted)" }}>{emptyText || "Aucune intervention"}</div>;
   return (
     <div className="flex flex-col gap-6">
@@ -963,7 +1014,7 @@ function HostawayImport({ me, onClose, notify }) {
       }
       await saveHostawayIds([...new Set([...hostawayIds, ...sel.map(r => r.id)])]);
       const admins = users.filter(u => isStrictAdmin(u) && u.email).map(u => u.email);
-      sendEmail(admins, `[Beylev] ${sel.length} intervention(s) Hostaway à valider`, `<p>${me.name} a soumis ${sel.length} intervention(s) importée(s) depuis Hostaway :</p><ul>${sel.map(r => `<li><b>${r.title}</b> — ${fmtDateLong(r.date)} — ${r.location === "CUSTOM" ? r.custom : r.location}</li>`).join("")}</ul><p><a href="${location.origin}">Ouvrir le planning</a></p>`);
+      sendEmail(admins, `[Beylev] ${sel.length} intervention(s) Hostaway à valider`, `<p>${escHtml(me.name)} a soumis ${sel.length} intervention(s) importée(s) depuis Hostaway :</p><ul>${sel.map(r => `<li><b>${escHtml(r.title)}</b> — ${fmtDateLong(r.date)} — ${escHtml(r.location === "CUSTOM" ? r.custom : r.location)}</li>`).join("")}</ul><p><a href="${location.origin}">Ouvrir le planning</a></p>`);
       notify(`${sel.length} intervention(s) soumise(s) pour validation`);
       onClose();
     } catch (e) { notify("Erreur : " + e.message, true); }
@@ -1007,7 +1058,6 @@ function HostawayImport({ me, onClose, notify }) {
   );
 }
 
-/* ===================== PLANNING ===================== */
 /* ===================== MONDAY ===================== */
 const MONDAY_FIELDS = [
   { id: "title", label: "Intervention", hint: "nom de l’élément par défaut", keys: [] },
@@ -1225,6 +1275,7 @@ function MondayImport({ me, onClose, notify }) {
   );
 }
 
+/* ===================== PLANNING ===================== */
 function PlanningScreen({ me, visible, onOpen, onNew }) {
   const { fetchMonths } = useData();
   const [view, setView] = useState("month");
@@ -1321,7 +1372,7 @@ function PlanningScreen({ me, visible, onOpen, onNew }) {
 
 /* ===================== KANBAN ===================== */
 function KanbanScreen({ me, visible, onOpen }) {
-  const { users, save, fetchMonths } = useData();
+  const { users, patch, fetchMonths } = useData();
   const [dragId, setDragId] = useState(null);
   const [over, setOver] = useState(null);
   const now = new Date();
@@ -1334,7 +1385,7 @@ function KanbanScreen({ me, visible, onOpen }) {
   const drop = async sid => {
     const m = items.find(x => x.id === dragId); setOver(null); setDragId(null);
     if (!m || (m.status || "todo") === sid || !canDrag(m)) return;
-    try { await save({ ...m, status: sid }, m.date); } catch (e) { alert(e.message); }
+    try { await patch(m, cur => ({ ...cur, status: sid })); } catch (e) { alert(e.message); }
   };
   return (
     <div>
@@ -1685,7 +1736,7 @@ function CompaniesSettings({ notify }) {
 
 /* ===================== REGLAGES ===================== */
 function SettingsScreen({ me, notify }) {
-  const { users, usersTrash, saveUsersTrash, deletedMissions, save, liveKeys, saveHostawayIds } = useData();
+  const { users, usersTrash, saveUsersTrash, deletedMissions, patch, liveKeys, saveHostawayIds } = useData();
   const [draft, setDraft] = useState(() => clean(users));
   const [dirty, setDirty] = useState(false);
   const [delTarget, setDelTarget] = useState(null);
@@ -1752,8 +1803,7 @@ function SettingsScreen({ me, notify }) {
     try { await adminCall({ action: "restore", id: u.id, deletedAt: u.deletedAt }); notify("Utilisateur restauré"); } catch (e) { notify(e.message, true); }
   }
   async function restoreMission(m) {
-    const { deletedAt, deletedBy, ...rest } = m;
-    try { await save(rest, m.date); notify("Intervention restaurée"); } catch (e) { notify(e.message, true); }
+    try { await patch(m, ({ deletedAt, deletedBy, ...rest }) => rest); notify("Intervention restaurée"); } catch (e) { notify(e.message, true); }
   }
   async function resetHostaway() {
     try { await saveHostawayIds([]); notify("Historique Hostaway réinitialisé"); } catch (e) { notify(e.message, true); }

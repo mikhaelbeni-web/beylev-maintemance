@@ -8,7 +8,7 @@ public/manifest.json       PWA
 api/_lib/firebase.js       Admin SDK (compte de service), verification du jeton Firebase, lien calendrier signe
 api/auth-migrate.js        connexion par identifiant, migration a la 1re connexion, preparation du mot de passe oublie
 api/admin-users.js         gestion des utilisateurs (Reglages) : comptes Firebase, roles, corbeille
-api/send-email.js          proxy Resend (utilisateur connecte)
+api/send-email.js          proxy Resend (utilisateur connecte, destinataires limites aux emails de l equipe)
 api/calendar.js            flux ICS signe : /api/calendar?user=u3&k=... (lien dans Reglages)
 api/healthcheck.js         cron quotidien : Firestore, comptes, Firebase Auth, app, Resend, sauvegarde des comptes, alerte email
 api/hostaway-import.js     taches Hostaway "pending", adresses des annonces, reservations groupees par listingMapId (admin ou manager connecte)
@@ -31,6 +31,7 @@ Projet Vercel > Settings > Environment Variables (Production et Preview), puis r
 | `EMAIL_FROM` | non | `gestion@beylev.com` par defaut |
 | `FIREBASE_SERVICE_ACCOUNT` | oui | JSON de la cle du compte de service Firebase (brut ou base64) |
 | `CALENDAR_SECRET` | non | secret de signature des liens calendrier (a defaut : cle du compte de service) |
+| `APP_URL` | non | adresse de l app testee par le diagnostic quotidien (`https://beylev-vercel.vercel.app` par defaut) |
 | `CRON_SECRET` | non | si defini, seul le cron Vercel peut appeler `/api/healthcheck` |
 
 Sans ces variables, les emails et l'import Hostaway renvoient une erreur explicite.

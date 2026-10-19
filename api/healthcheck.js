@@ -4,23 +4,30 @@
 
 const fb = require("./_lib/firebase");
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
-const FROM_EMAIL     = "gestion@beylev.com";
+const FROM_EMAIL     = process.env.EMAIL_FROM || "gestion@beylev.com";
 const ALERT_EMAIL    = "gestion@beylev.com";
-const APP_URL        = "https://beylev-vercel.vercel.app";
+const APP_URL        = process.env.APP_URL || "https://beylev-vercel.vercel.app";
 
 // Lecture/ecriture via le compte de service : independant des regles Firestore publiees.
 const getDoc = fb.getDoc;
 const setDoc = fb.setDoc;
 
-async function checkFirestore() {
-  const users = await getDoc("lv_users_v1");
+// Liste des comptes lue une seule fois par diagnostic ; les verifications suivantes s'arretent proprement si elle est illisible.
+let usersPromise = null;
+async function loadUsers() {
+  const users = await (usersPromise || (usersPromise = getDoc(fb.USERS_KEY)));
   if (!users || !Array.isArray(users)) throw new Error("Donnee utilisateurs corrompue ou absente");
+  return users;
+}
+
+async function checkFirestore() {
+  const users = await loadUsers();
   if (users.length === 0) throw new Error("Liste utilisateurs vide - possible corruption");
   return `${users.length} utilisateurs OK`;
 }
 
 async function checkUserIntegrity() {
-  const users = await getDoc("lv_users_v1");
+  const users = await loadUsers();
   const errors = [];
   const requiredUsernames = ["laetitia", "mikhael", "tech"];
   for (const req of requiredUsernames) {
@@ -38,8 +45,7 @@ async function checkUserIntegrity() {
 }
 
 async function backupUsers() {
-  const users = await getDoc("lv_users_v1");
-  if (!users) return "Rien a sauvegarder";
+  const users = await loadUsers();
   const backups = await getDoc("users_backups") || [];
   const today = new Date().toISOString().slice(0, 10);
   const existingToday = backups.find(b => b.date === today);
@@ -54,13 +60,13 @@ async function backupUsers() {
 }
 
 async function checkAuthAccounts() {
-  const users = await getDoc("lv_users_v1");
+  const users = await loadUsers();
   const linked = users.filter(u => u.authUid);
   const problems = [];
-  for (const u of linked) {
+  await Promise.all(linked.map(async u => {
     try { const r = await fb.auth().getUser(u.authUid); if (r.disabled) problems.push(`Compte Firebase de "${u.username}" desactive`); }
     catch (e) { problems.push(`Compte Firebase de "${u.username}" introuvable`); }
-  }
+  }));
   if (problems.length) throw new Error(problems.join(" | "));
   return `${linked.length}/${users.length} utilisateur(s) relies a Firebase Auth`;
 }
@@ -74,6 +80,7 @@ async function checkAppReachable() {
 }
 
 async function checkResend() {
+  if (!RESEND_API_KEY) throw new Error("RESEND_API_KEY manquante dans les variables Vercel");
   const r = await fetch("https://api.resend.com/domains", {
     headers: { "Authorization": `Bearer ${RESEND_API_KEY}` }
   });
@@ -110,7 +117,7 @@ async function sendAlert(failures) {
     </div>
   </div>`;
 
-  await fetch("https://api.resend.com/emails", {
+  const r = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: { "Authorization": `Bearer ${RESEND_API_KEY}`, "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -120,12 +127,15 @@ async function sendAlert(failures) {
       html
     })
   });
+  // Sans ce controle, une alerte refusee par Resend etait comptee comme envoyee.
+  if (!r.ok) throw new Error("Resend a refuse l'alerte - HTTP " + r.status);
 }
 
 module.exports = async (req, res) => {
   // Si CRON_SECRET est defini dans Vercel, seul le cron Vercel (qui l envoie) peut declencher le diagnostic.
   if (process.env.CRON_SECRET && req.headers.authorization !== `Bearer ${process.env.CRON_SECRET}`) return res.status(401).json({ error: "Non autorise" });
   const results = { checked_at: new Date().toISOString(), tests: {}, failures: [] };
+  usersPromise = null;
 
   const tests = [
     { name: "Firestore", fn: checkFirestore },
