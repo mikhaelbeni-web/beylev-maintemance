@@ -453,7 +453,7 @@ function PageHeader({ title, subtitle, actions, tabs }) {
 }
 
 /* ===================== FICHE INTERVENTION ===================== */
-function PhotoThumb({ photo }) {
+function PhotoThumb({ photo, onDelete }) {
   const [src, setSrc] = useState(photo.base64 || null);
   useEffect(() => {
     if (src) return;
@@ -469,7 +469,10 @@ function PhotoThumb({ photo }) {
   if (!img) return null;
   return (
     <>
-      <img src={img} alt="" onClick={() => setBig(true)} style={{ width: 72, height: 72, objectFit: "cover", borderRadius: 6, border: "1px solid var(--border-soft)", cursor: "zoom-in" }} />
+      <span style={{ position: "relative", display: "inline-block" }}>
+        <img src={img} alt="" onClick={() => setBig(true)} style={{ width: 72, height: 72, objectFit: "cover", borderRadius: 6, border: "1px solid var(--border-soft)", cursor: "zoom-in" }} />
+        {onDelete && <button type="button" title="Supprimer la photo" onClick={onDelete} style={{ position: "absolute", top: -6, right: -6, width: 22, height: 22, borderRadius: 11, border: "2px solid #fff", background: "var(--stuck)", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", padding: 0 }}><Icon name="x" size={12} /></button>}
+      </span>
       {big && <div onClick={() => setBig(false)} style={{ position: "fixed", inset: 0, zIndex: 90, background: "rgba(0,0,0,.85)", display: "flex", alignItems: "center", justifyContent: "center", padding: 12, cursor: "zoom-out" }}><img src={img} alt="" style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }} /></div>}
     </>
   );
@@ -565,13 +568,24 @@ function MissionModal({ initial, me, onClose, notify }) {
         const data = await compressImage(f);
         const id = uid();
         await db.collection(PHOTOS).doc(id).set({ b: data });
-        added.push({ id });
+        added.push({ id, by: me.id });
       } catch (err) { notify("Photo non enregistrée : " + err.message, true); }
     }
     if (!added.length) return;
     if (isNew) return setM(p => ({ ...p, photos: [...(p.photos || []), ...added] }));
     try { await patchFields(cur => ({ ...cur, photos: [...(cur.photos || []), ...added] }), ["photos"]); notify(added.length > 1 ? "Photos ajoutées" : "Photo ajoutée"); }
     catch (err) { notify("Erreur : " + err.message, true); }
+  }
+  // Le technicien supprime les photos qu il a ajoutees ; admin et manager, toutes les photos.
+  const canDeletePhoto = p => !isTech || p.by === me.id;
+  async function removePhoto(p) {
+    if (!window.confirm("Supprimer cette photo ?")) return;
+    try {
+      if (!isNew) await patchFields(cur => ({ ...cur, photos: (cur.photos || []).filter(x => x.id !== p.id) }), ["photos"]);
+      else setM(x => ({ ...x, photos: (x.photos || []).filter(y => y.id !== p.id) }));
+      db.collection(PHOTOS).doc(p.id).delete().catch(() => {});
+      notify("Photo supprimée");
+    } catch (err) { notify("Erreur : " + err.message, true); }
   }
   async function addComment() {
     if (!comment.trim()) return;
@@ -659,7 +673,7 @@ function MissionModal({ initial, me, onClose, notify }) {
 
       <label className="m-label">Photos ({(m.photos || []).length})</label>
       <div className="flex gap-2 flex-wrap items-center">
-        {(m.photos || []).map(p => <PhotoThumb key={p.id} photo={p} />)}
+        {(m.photos || []).map(p => <PhotoThumb key={p.id} photo={p} onDelete={canDeletePhoto(p) ? () => removePhoto(p) : null} />)}
         <label style={{ width: 72, height: 72, borderRadius: 6, border: "2px dashed var(--border)", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--muted)", cursor: "pointer" }}>
           <Icon name="camera" />
           <input type="file" accept="image/*" multiple style={{ display: "none" }} onChange={addPhotos} />
