@@ -10,6 +10,7 @@
 const fb = require("./_lib/firebase");
 
 const ROLES = ["admin", "manager", "tech"];
+// email : email reel, sert aussi d'email du compte Firebase (connexion et "Mot de passe oublie").
 const EDITABLE = ["username", "name", "email", "role", "color", "initials", "adminAccess"];
 
 function calendarLinks(req, users) {
@@ -22,15 +23,21 @@ function calendarLinks(req, users) {
 async function updateAuthUser(u, changes) {
   if (!u.authUid) return;
   try { await fb.auth().updateUser(u.authUid, changes); }
-  catch (e) { if (e.code !== "auth/user-not-found") throw e; }
+  catch (e) {
+    if (e.code === "auth/email-already-exists") throw fb.httpError(400, `${u.name || u.username} : cet email est deja utilise par un autre compte`);
+    if (e.code !== "auth/user-not-found") throw e;
+  }
 }
 
 /* Cree ou met a jour le compte Firebase d'un utilisateur et renvoie son uid. */
 async function ensureAuthUser(u, password) {
-  const email = fb.emailOf(u.username);
+  const email = fb.authEmailOf(u);
   if (u.authUid) {
     try { await fb.auth().updateUser(u.authUid, { email, password, displayName: u.name, disabled: false }); return u.authUid; }
-    catch (e) { if (e.code !== "auth/user-not-found") throw e; }
+    catch (e) {
+      if (e.code === "auth/email-already-exists") throw fb.httpError(400, `${u.name || u.username} : cet email est deja utilise par un autre compte`);
+      if (e.code !== "auth/user-not-found") throw e;
+    }
   }
   try {
     const existing = await fb.auth().getUserByEmail(email);
@@ -54,6 +61,7 @@ async function sync(req, me, current, incoming) {
     EDITABLE.forEach(k => { if (x[k] !== undefined) u[k] = x[k]; });
     u.id = String(x.id);
     u.username = String(u.username || "").trim().toLowerCase();
+    u.email = fb.normEmail(u.email);
     if (u.role !== "manager") delete u.adminAccess;
     return { u, prev, newPassword: typeof x.newPassword === "string" && x.newPassword ? x.newPassword : null };
   });
@@ -61,6 +69,10 @@ async function sync(req, me, current, incoming) {
   const names = next.map(n => n.u.username);
   if (names.some(n => !fb.USERNAME_RE.test(n))) throw fb.httpError(400, "Identifiant invalide : 2 a 40 caracteres, lettres minuscules, chiffres, . _ -");
   if (new Set(names).size !== names.length) throw fb.httpError(400, "Deux utilisateurs ont le meme identifiant");
+  const emails = next.map(n => n.u.email).filter(Boolean);
+  const badEmail = next.find(n => n.u.email && !fb.EMAIL_RE.test(n.u.email));
+  if (badEmail) throw fb.httpError(400, `Email invalide pour ${badEmail.u.name || badEmail.u.username}`);
+  if (new Set(emails).size !== emails.length) throw fb.httpError(400, "Deux utilisateurs ont le meme email");
   if (next.some(n => !ROLES.includes(n.u.role))) throw fb.httpError(400, "Role inconnu");
   if (!next.some(n => n.u.role === "admin")) throw fb.httpError(400, "Il doit rester au moins un administrateur");
   for (const n of next) {
@@ -71,7 +83,7 @@ async function sync(req, me, current, incoming) {
   for (const n of next) {
     const { u, prev, newPassword } = n;
     if (newPassword) u.authUid = await ensureAuthUser(u, newPassword);
-    else if (u.authUid && (prev.username !== u.username || prev.name !== u.name)) await updateAuthUser(u, { email: fb.emailOf(u.username), displayName: u.name });
+    else if (u.authUid && (fb.authEmailOf(prev) !== fb.authEmailOf(u) || prev.name !== u.name)) await updateAuthUser(u, { email: fb.authEmailOf(u), displayName: u.name });
     if (u.authUid) {
       await fb.auth().setCustomUserClaims(u.authUid, fb.claimsOf(u));
       const lostRights = prev.authUid && ((prev.role === "admin" && u.role !== "admin") || (fb.canSettings(prev) && !fb.canSettings(u)) || (prev.role !== "tech" && u.role === "tech"));

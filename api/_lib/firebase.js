@@ -8,9 +8,13 @@ const COL = "app_data";
 const USERS_KEY = "lv_users_v1";
 const USERS_TRASH_KEY = "users_trash";
 const USERS_BACKUPS_KEY = "users_backups";
-// Les comptes Firebase utilisent un email technique derive de l'identifiant (meme regle que public/index.html).
+// Email du compte Firebase : l'email reel de l'utilisateur (champ email de lv_users_v1) s'il est renseigne,
+// sinon un email technique derive de l'identifiant (meme regle que public/index.html), qui ne recoit rien.
 const AUTH_EMAIL_DOMAIN = "maintenance.beylev.com";
 const USERNAME_RE = /^[a-z0-9._-]{2,40}$/;
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+// Cle web publique (deja dans public/index.html), utilisee pour verifier un mot de passe cote serveur.
+const WEB_API_KEY = process.env.FIREBASE_WEB_API_KEY || "AIzaSyB7i6PnqFAdBuGuFM84BKGYWwRT0P8GClc";
 
 let serviceAccount = null;
 function getServiceAccount() {
@@ -41,6 +45,32 @@ async function getDoc(k) { return parseSnap(await docRef(k).get()); }
 function setDoc(k, v) { return docRef(k).set({ v: JSON.stringify(v) }); }
 
 const emailOf = username => `${String(username || "").trim().toLowerCase()}@${AUTH_EMAIL_DOMAIN}`;
+const normEmail = e => String(e || "").trim().toLowerCase();
+const authEmailOf = u => normEmail(u.email) || emailOf(u.username);
+/* Utilisateur designe a la connexion par son identifiant ou par son email. */
+function findByLogin(users, login) {
+  const id = normEmail(login);
+  if (!id) return null;
+  return users.find(u => (u.username || "").toLowerCase() === id) || users.find(u => normEmail(u.email) === id) || null;
+}
+
+/* Verifie un mot de passe Firebase (API REST d'Auth, comme le ferait le navigateur). */
+async function passwordOk(email, password) {
+  const r = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${WEB_API_KEY}`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password, returnSecureToken: false })
+  });
+  return r.ok;
+}
+
+/* Rattache le compte Firebase a l'utilisateur, dans une transaction pour ne pas ecraser une modification concurrente. */
+function attachAuthUid(userId, uid) {
+  return db().runTransaction(async tx => {
+    const ref = docRef(USERS_KEY);
+    const list = parseSnap(await tx.get(ref)) || [];
+    tx.set(ref, { v: JSON.stringify(list.map(x => x.id === userId ? { ...x, authUid: uid } : x)) });
+  });
+}
 const canSettings = u => !!u && (u.role === "admin" || !!u.adminAccess);
 const claimsOf = u => ({ appUserId: u.id, role: u.role, settings: canSettings(u) });
 /* Ce qui peut sortir du serveur : jamais de mot de passe. */
@@ -80,7 +110,7 @@ function calendarTokenOk(userId, k) {
 
 module.exports = {
   admin, db, auth, getDoc, setDoc, docRef, parseSnap,
-  USERS_KEY, USERS_TRASH_KEY, USERS_BACKUPS_KEY, AUTH_EMAIL_DOMAIN, USERNAME_RE,
-  emailOf, canSettings, claimsOf, publicUser, requireUser, calendarToken, calendarTokenOk,
+  USERS_KEY, USERS_TRASH_KEY, USERS_BACKUPS_KEY, AUTH_EMAIL_DOMAIN, USERNAME_RE, EMAIL_RE,
+  emailOf, normEmail, authEmailOf, findByLogin, passwordOk, attachAuthUid, canSettings, claimsOf, publicUser, requireUser, calendarToken, calendarTokenOk,
   send, httpError, body
 };

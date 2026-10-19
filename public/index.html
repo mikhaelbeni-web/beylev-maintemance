@@ -94,6 +94,7 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
 const auth = firebase.auth();
+auth.languageCode = "fr";
 const COL = "app_data";
 const PHOTOS = "app_photos";
 const USERS_KEY = "lv_users_v1";
@@ -101,7 +102,7 @@ const USERS_TRASH_KEY = "users_trash";
 const HOSTAWAY_IDS_KEY = "hostaway_handled_ids";
 const HOSTAWAY_NOTIFS_KEY = "hostaway_notifications";
 const LEGACY_SESSION_KEY = "beylev_session_v2";
-/* Les comptes Firebase utilisent un email technique derive de l identifiant (meme regle que api/_lib/firebase.js). */
+/* Compte Firebase : email reel de l utilisateur s il est renseigne, sinon email technique derive de l identifiant (meme regle que api/_lib/firebase.js). */
 const AUTH_EMAIL_DOMAIN = "maintenance.beylev.com";
 const GESTION_EMAIL = "gestion@beylev.com";
 const TRASH_DAYS = 30;
@@ -1194,6 +1195,9 @@ function SettingsScreen({ me, notify }) {
     if (names.some(n => !n)) return notify("Chaque utilisateur doit avoir un identifiant", true);
     if (new Set(names).size !== names.length) return notify("Deux utilisateurs ont le même identifiant", true);
     if (names.some(n => !/^[a-z0-9._-]{2,40}$/.test(n))) return notify("Identifiant : 2 à 40 caractères, lettres minuscules, chiffres, . _ - (sans espace ni accent)", true);
+    const emails = draft.map(u => (u.email || "").trim().toLowerCase()).filter(Boolean);
+    if (emails.some(e => !isEmail(e))) return notify("Un des emails est invalide", true);
+    if (new Set(emails).size !== emails.length) return notify("Deux utilisateurs ont le même email", true);
     if (draft.some(u => !u.authUid && !u.legacyPassword && !newPw[u.id])) return notify("Chaque nouvel utilisateur doit avoir un mot de passe", true);
     if (Object.values(newPw).some(p => p && p.length < 6)) return notify("Mot de passe : 6 caractères minimum", true);
     setBusy(true);
@@ -1273,7 +1277,7 @@ function SettingsScreen({ me, notify }) {
                   <div><label className="m-label">{u.authUid || u.legacyPassword ? "Nouveau mot de passe (laisser vide pour ne pas changer)" : "Mot de passe"}</label>
                     <div className="flex gap-1"><input className="m-input" type={showPw[u.id] ? "text" : "password"} value={newPw[u.id] || ""} autoComplete="new-password" placeholder={u.authUid || u.legacyPassword ? "••••••" : ""} onChange={e => { setDirty(true); setNewPw(p => ({ ...p, [u.id]: e.target.value })); }} />
                       <button className="m-btn-sec" style={{ padding: "4px 8px" }} onClick={() => setShowPw(p => ({ ...p, [u.id]: !p[u.id] }))}>{showPw[u.id] ? "🙈" : "👁"}</button></div></div>
-                  <div><label className="m-label">Email</label><input className="m-input" type="email" value={u.email || ""} onChange={e => upd(u.id, "email", e.target.value)} /></div>
+                  <div><label className="m-label">Email (connexion, mot de passe oublié, notifications)</label><input className="m-input" type="email" value={u.email || ""} onChange={e => upd(u.id, "email", e.target.value)} autoCapitalize="none" /></div>
                   <div><label className="m-label">Rôle</label>
                     <select className="m-input" value={u.role} onChange={e => {
                       const v = e.target.value;
@@ -1286,7 +1290,7 @@ function SettingsScreen({ me, notify }) {
                     <div className="flex gap-1 flex-wrap" style={{ paddingTop: 4 }}>{USER_COLORS.map(c => <button key={c} onClick={() => upd(u.id, "color", c)} style={{ width: 24, height: 24, borderRadius: "50%", background: c, border: colorOf(u) === c ? "3px solid #323338" : "2px solid #fff", boxShadow: "0 0 0 1px #d0d4e4" }} />)}</div></div>
                 </div>
                 {u.role === "manager" && <label className="flex items-center gap-2" style={{ marginTop: 10, fontSize: 14 }}><input type="checkbox" checked={!!u.adminAccess} onChange={e => upd(u.id, "adminAccess", e.target.checked)} /> Accès aux réglages</label>}
-                <div style={{ marginTop: 8, fontSize: 12, color: u.authUid ? "var(--muted)" : "#8a5300" }}>{u.authUid ? "Compte de connexion sécurisé actif" : u.legacyPassword ? "Pas encore migré : sera migré automatiquement à sa prochaine connexion avec son mot de passe actuel" : "Aucun mot de passe : définissez-en un puis enregistrez"}</div>
+                <div style={{ marginTop: 8, fontSize: 12, color: u.authUid ? "var(--muted)" : "#8a5300" }}>{u.authUid ? `Compte de connexion sécurisé actif : se connecte avec ${u.email ? u.email + " ou " : ""}« ${u.username} »` : u.legacyPassword ? "Pas encore migré : sera migré automatiquement à sa prochaine connexion avec son mot de passe actuel" : "Aucun mot de passe : définissez-en un puis enregistrez"}</div>
                 {calendars[u.id] && <div style={{ marginTop: 4, fontSize: 12, color: "var(--muted)", wordBreak: "break-all" }}>Calendrier (ICS, lien personnel à ne pas partager) : <a href={calendars[u.id]} style={{ color: "#0073ea" }}>{calendars[u.id]}</a></div>}
               </div>
             ))}
@@ -1365,45 +1369,77 @@ function authErrorText(e) {
   return (e && e.message) || "Connexion impossible";
 }
 
+const isEmail = v => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
+
 function LoginScreen({ notice }) {
+  const [mode, setMode] = useState("login");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [err, setErr] = useState("");
+  const [info, setInfo] = useState("");
   const [busy, setBusy] = useState(false);
   async function submit(e) {
     e.preventDefault();
     const id = username.trim().toLowerCase();
     if (!id || !password) return setErr("Identifiant ou mot de passe incorrect");
-    setBusy(true); setErr("");
+    setBusy(true); setErr(""); setInfo("");
     try {
       await auth.signInWithEmailAndPassword(loginEmail(id), password);
     } catch (e1) {
-      if (!BAD_CREDENTIALS.includes(e1.code) || id.includes("@")) { setErr(authErrorText(e1)); setBusy(false); return; }
-      // Premiere connexion depuis le passage a Firebase Auth : le serveur verifie l ancien mot de passe et cree le compte.
+      if (!BAD_CREDENTIALS.includes(e1.code)) { setErr(authErrorText(e1)); setBusy(false); return; }
+      // Le serveur trouve l email du compte (identifiant tape alors que le compte porte l email reel),
+      // ou cree le compte a la premiere connexion depuis le passage a Firebase Auth (ancien mot de passe verifie).
       try {
         const r = await fetch("/api/auth-migrate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: id, password }) });
         const j = await r.json().catch(() => ({}));
-        if (!r.ok) throw new Error(j.error || "Identifiant ou mot de passe incorrect");
-        await auth.signInWithEmailAndPassword(loginEmail(id), password);
+        if (!r.ok || !j.email) throw new Error(j.error || "Identifiant ou mot de passe incorrect");
+        await auth.signInWithEmailAndPassword(j.email, password);
       } catch (e2) { setErr(e2.code ? authErrorText(e2) : e2.message); setBusy(false); return; }
     }
     setBusy(false);
   }
+  async function sendReset(e) {
+    e.preventDefault();
+    const email = username.trim().toLowerCase();
+    if (!isEmail(email)) return setErr("Saisissez l’email de votre compte");
+    setBusy(true); setErr(""); setInfo("");
+    try {
+      // Cree le compte Firebase s il n existe pas encore (utilisateur pas encore migre), sans rien reveler.
+      await fetch("/api/auth-migrate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "prepareReset", email }) }).catch(() => {});
+      try { await auth.sendPasswordResetEmail(email, { url: location.origin }); }
+      catch (e1) {
+        // Domaine de l app absent des domaines autorises Firebase : lien sans retour automatique vers l app.
+        if (e1.code === "auth/unauthorized-continue-uri" || e1.code === "auth/invalid-continue-uri") await auth.sendPasswordResetEmail(email);
+        else throw e1;
+      }
+      setInfo("Si un compte correspond à cet email, un lien de réinitialisation vient d’être envoyé. Pensez à regarder dans les spams.");
+    } catch (e1) {
+      if (e1.code === "auth/user-not-found") setInfo("Si un compte correspond à cet email, un lien de réinitialisation vient d’être envoyé. Pensez à regarder dans les spams.");
+      else setErr(authErrorText(e1));
+    }
+    setBusy(false);
+  }
+  const switchMode = m => { setMode(m); setErr(""); setInfo(""); };
+  const reset = mode === "reset";
   return (
     <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: 16, background: "linear-gradient(135deg,#6161ff 0%,#0073ea 45%,#00c875 100%)" }}>
-      <form onSubmit={submit} className="m-card fade-in" style={{ width: "100%", maxWidth: 380, padding: 28 }}>
+      <form onSubmit={reset ? sendReset : submit} className="m-card fade-in" style={{ width: "100%", maxWidth: 380, padding: 28 }}>
         <div className="flex items-center gap-2" style={{ marginBottom: 18 }}>
           <div className="flex gap-1">{["#df2f4a", "#fdab3d", "#00c875"].map(c => <span key={c} style={{ width: 10, height: 22, borderRadius: 6, background: c, display: "inline-block", transform: "rotate(20deg)" }} />)}</div>
           <span style={{ fontWeight: 800, fontSize: 20 }}>beylev</span><span style={{ fontSize: 20, color: "var(--muted)" }}>maintenance</span>
         </div>
-        <h1 style={{ fontSize: 24, margin: "0 0 4px", fontWeight: 700 }}>Connexion</h1>
-        <p style={{ margin: "0 0 12px", color: "var(--muted)", fontSize: 14 }}>Planning des interventions techniques</p>
-        <label className="m-label">Identifiant</label>
-        <input className="m-input" value={username} onChange={e => setUsername(e.target.value)} autoCapitalize="none" autoComplete="username" />
-        <label className="m-label">Mot de passe</label>
-        <input className="m-input" type="password" value={password} onChange={e => setPassword(e.target.value)} autoComplete="current-password" />
-        {(err || notice) && <div style={{ color: "var(--stuck)", fontSize: 14, marginTop: 10 }}>{err || notice}</div>}
-        <button className="m-btn" disabled={busy} style={{ width: "100%", marginTop: 18, padding: "10px 0" }}>{busy ? "Connexion…" : "Se connecter"}</button>
+        <h1 style={{ fontSize: 24, margin: "0 0 4px", fontWeight: 700 }}>{reset ? "Mot de passe oublié" : "Connexion"}</h1>
+        <p style={{ margin: "0 0 12px", color: "var(--muted)", fontSize: 14 }}>{reset ? "Recevez un lien par email pour choisir un nouveau mot de passe." : "Planning des interventions techniques"}</p>
+        <label className="m-label">{reset ? "Email" : "Email ou identifiant"}</label>
+        <input className="m-input" type={reset ? "email" : "text"} value={username} onChange={e => setUsername(e.target.value)} autoCapitalize="none" autoComplete={reset ? "email" : "username"} />
+        {!reset && <>
+          <label className="m-label">Mot de passe</label>
+          <input className="m-input" type="password" value={password} onChange={e => setPassword(e.target.value)} autoComplete="current-password" />
+        </>}
+        {(err || (!info && notice)) && <div style={{ color: "var(--stuck)", fontSize: 14, marginTop: 10 }}>{err || notice}</div>}
+        {info && <div style={{ color: "#007a4d", fontSize: 14, marginTop: 10 }}>{info}</div>}
+        <button className="m-btn" disabled={busy} style={{ width: "100%", marginTop: 18, padding: "10px 0" }}>{reset ? (busy ? "Envoi…" : "Envoyer le lien") : (busy ? "Connexion…" : "Se connecter")}</button>
+        <button type="button" onClick={() => switchMode(reset ? "login" : "reset")} style={{ border: 0, background: "none", color: "#0073ea", fontSize: 14, marginTop: 12, width: "100%", cursor: "pointer" }}>{reset ? "← Retour à la connexion" : "Mot de passe oublié ?"}</button>
       </form>
     </div>
   );
