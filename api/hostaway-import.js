@@ -35,23 +35,18 @@ async function hostawayGet(path, token) {
   return r.json();
 }
 
-async function fetchAllReservations(token, arrivalStart, arrivalEnd) {
-  // Recupere TOUTES les reservations d'un coup, puis on les trie nous-memes
-  // par listingMapId (le filtre par listing cote Hostaway s'est avere non fiable)
-  let all = [];
-  let offset = 0;
-  const limit = 500;
-  for (let page = 0; page < 10; page++) {
-    const rd = await hostawayGet(
-      `/reservations?arrivalStartDate=${arrivalStart}&arrivalEndDate=${arrivalEnd}&limit=${limit}&offset=${offset}`,
-      token
-    );
-    const results = rd.result || [];
-    all = all.concat(results);
-    if (results.length < limit) break;
-    offset += limit;
+/* Lit toutes les pages d'une liste Hostaway (au plus maxPages pages de `limit`).
+   Arret aussi si une page ne rapporte rien de nouveau (offset ignore par l'API : pas de doublons). */
+async function hostawayAll(path, token, limit, maxPages = 10) {
+  const sep = path.includes("?") ? "&" : "?";
+  const byId = new Map();
+  for (let page = 0; page < maxPages; page++) {
+    const results = (await hostawayGet(`${path}${sep}limit=${limit}&offset=${page * limit}`, token)).result || [];
+    const before = byId.size;
+    results.forEach((x, i) => byId.set(x && x.id != null ? String(x.id) : `${page}-${i}`, x));
+    if (results.length < limit || byId.size === before) break;
   }
-  return all;
+  return [...byId.values()];
 }
 
 module.exports = async (req, res) => {
@@ -61,17 +56,14 @@ module.exports = async (req, res) => {
     const token = await getToken();
     const debug = req.query.debug === "1";
 
-    // 1. TOUTES les taches, peu importe leur statut Hostaway (a faire/accepte/en cours/termine)
-    //    -> volontaire: Hostaway categorise parfois mal, on ne veut rien louper
-    const tasksData = await hostawayGet("/tasks?limit=250", token);
-    const allRawTasks = tasksData.result || [];
-    // On ne garde que les taches au statut "pending" (= colonne "A faire" sur Hostaway)
+    // 1. Toutes les pages de taches (une seule page de 250 laissait passer les nouvelles taches
+    //    des que le compte en cumulait plus), puis seulement le statut "pending" (= colonne "A faire")
+    const allRawTasks = await hostawayAll("/tasks", token, 250, 20);
     const rawTasks = allRawTasks.filter((t) => t.status === "pending");
 
     // 2. Les annonces pour retrouver l'adresse complete associee a chaque tache
-    const listingsData = await hostawayGet("/listings?limit=250", token);
     const listings = {};
-    (listingsData.result || []).forEach((l) => {
+    (await hostawayAll("/listings", token, 250)).forEach((l) => {
       const parts = [l.address, l.city, l.zipcode].filter(Boolean);
       const fullAddress = parts.join(", ");
       listings[l.id] = {
@@ -80,16 +72,18 @@ module.exports = async (req, res) => {
       };
     });
 
-    // 3. Reservations des 120 prochains jours -> pour calculer la 1ere dispo
+    // 3. Reservations en cours et des 120 prochains jours -> pour calculer la 1ere dispo
     //    Recuperees UNE FOIS pour tout le compte, puis regroupees par leur
     //    propre listingMapId. Si Hostaway refuse (permissions), on degrade
     //    proprement : les taches s'afficheront quand meme, juste sans date suggeree.
-    const today = new Date().toISOString().slice(0, 10);
+    // Les arrivees des 60 derniers jours sont incluses : un client deja dans les lieux aujourd'hui occupe l'appartement.
+    const since = new Date(Date.now() - 60 * 24 * 3600 * 1000).toISOString().slice(0, 10);
     const future = new Date(Date.now() + 120 * 24 * 3600 * 1000).toISOString().slice(0, 10);
     const reservationsByListing = {};
     let reservationsError = null;
     try {
-      const allReservations = await fetchAllReservations(token, today, future);
+      // Toutes les reservations du compte, regroupees ici par listingMapId (le filtre par annonce cote Hostaway s'est avere non fiable)
+      const allReservations = await hostawayAll(`/reservations?arrivalStartDate=${since}&arrivalEndDate=${future}`, token, 500);
       allReservations
         .filter((r) => r.status !== "cancelled")
         .forEach((r) => {
@@ -105,7 +99,7 @@ module.exports = async (req, res) => {
       reservationsError = e.message;
     }
 
-    // 4. Mise en forme - on garde TOUT, sans filtrer par statut
+    // 4. Mise en forme
     const tasks = rawTasks.map((t) => ({
       id: String(t.id),
       title: t.title || t.name || "Tache sans titre",

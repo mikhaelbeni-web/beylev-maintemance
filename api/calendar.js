@@ -2,7 +2,7 @@
 // Les applications calendrier ne peuvent pas envoyer de jeton Firebase, d'ou la signature dans l'URL.
 const fb = require('./_lib/firebase');
 
-function escICS(s){return(s||'').replace(/\\/g,'\\\\').replace(/\n/g,'\\n').replace(/,/g,'\\,').replace(/;/g,'\\;');}
+function escICS(s){return String(s||'').replace(/\\/g,'\\\\').replace(/\r/g,'').replace(/\n/g,'\\n').replace(/,/g,'\\,').replace(/;/g,'\\;');}
 function d2ICS(d){return d.replace(/-/g,'');}
 function nextDay(d){const dt=new Date(d+'T12:00:00');dt.setDate(dt.getDate()+1);return dt.toISOString().slice(0,10).replace(/-/g,'');}
 
