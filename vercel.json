@@ -1,6 +1,6 @@
 {
   "outputDirectory": "public",
-  "buildCommand": null,
+  "buildCommand": "npm run build",
   "crons": [
     {
       "path": "/api/healthcheck",
