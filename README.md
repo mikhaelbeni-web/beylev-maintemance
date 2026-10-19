@@ -1,9 +1,13 @@
 # Maintenance Beylev
 
-Planning des interventions techniques, style monday.com, sans build (React 18 + Babel + Tailwind + Firestore compat 9.22.2, CDN jsDelivr).
+Planning des interventions techniques, style monday.com (React 18 + Tailwind 4 + Firestore compat 9.22.2 ; React et Firebase via CDN jsDelivr).
+
+L app est ecrite dans `src/app.jsx` et compilee au deploiement par Vercel (`npm run build` : esbuild pour le JSX, Tailwind CLI pour le CSS) vers `public/app.js` et `public/app.css`, qui ne sont pas versionnes. Le telephone n a plus a telecharger Babel (600 Ko compresses) ni a compiler l app a chaque ouverture. En local : `npm install` puis `npm run build`.
 
 ```
-public/index.html          application
+src/app.jsx                application (JSX)
+src/app.css                entree Tailwind
+public/index.html          page : CSS de base, React et Firebase par CDN, puis app.css et app.js compiles
 public/manifest.json       PWA
 api/_lib/firebase.js       Admin SDK (compte de service), verification du jeton Firebase, lien calendrier signe
 api/auth-migrate.js        connexion par identifiant, migration a la 1re connexion, preparation du mot de passe oublie
@@ -14,7 +18,7 @@ api/healthcheck.js         cron quotidien : Firestore, comptes, Firebase Auth, a
 api/hostaway-import.js     taches Hostaway "pending", adresses des annonces, reservations groupees par listingMapId (admin ou manager connecte)
 api/monday.js              lecture seule Monday : /api/monday?action=boards | items&board=ID (admin ou manager connecte)
 firestore.rules            regles Firestore a publier en dernier (voir plus bas)
-package.json               dependance firebase-admin des fonctions
+package.json               firebase-admin (fonctions), esbuild et Tailwind CLI (build)
 vercel.json                outputDirectory public + cron
 ```
 

@@ -1,9 +1,16 @@
 {
   "name": "beylev-maintenance",
   "private": true,
-  "description": "Fonctions serverless Vercel (api/). L'application elle-meme (public/) reste sans build.",
+  "description": "Fonctions serverless Vercel (api/) et application (src/app.jsx compile vers public/ par npm run build).",
   "engines": { "node": ">=18" },
+  "scripts": {
+    "build": "esbuild src/app.jsx --bundle --minify --target=es2019,safari13 --outfile=public/app.js && tailwindcss -i src/app.css -o public/app.css --minify"
+  },
   "dependencies": {
     "firebase-admin": "12.7.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "4.1.11",
+    "esbuild": "0.24.0"
   }
 }
