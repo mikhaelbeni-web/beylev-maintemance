@@ -11,7 +11,8 @@ api/admin-users.js         gestion des utilisateurs (Reglages) : comptes Firebas
 api/send-email.js          proxy Resend (utilisateur connecte)
 api/calendar.js            flux ICS signe : /api/calendar?user=u3&k=... (lien dans Reglages)
 api/healthcheck.js         cron quotidien : Firestore, comptes, Firebase Auth, app, Resend, sauvegarde des comptes, alerte email
-api/hostaway-import.js     taches Hostaway "pending" (admin ou manager connecte)
+api/hostaway-import.js     taches Hostaway "pending", adresses des annonces, reservations groupees par listingMapId (admin ou manager connecte)
+api/monday.js              lecture seule Monday : /api/monday?action=boards | items&board=ID (admin ou manager connecte)
 firestore.rules            regles Firestore a publier en dernier (voir plus bas)
 package.json               dependance firebase-admin des fonctions
 vercel.json                outputDirectory public + cron
@@ -26,6 +27,7 @@ Projet Vercel > Settings > Environment Variables (Production et Preview), puis r
 | `RESEND_API_KEY` | oui | cle Resend (`re_...`) |
 | `HOSTAWAY_CLIENT_SECRET` | oui | secret API Hostaway |
 | `HOSTAWAY_ACCOUNT_ID` | non | `148614` par defaut |
+| `MONDAY_API_TOKEN` | pour Monday | jeton personnel Monday (avatar > Developers > My access tokens) |
 | `EMAIL_FROM` | non | `gestion@beylev.com` par defaut |
 | `FIREBASE_SERVICE_ACCOUNT` | oui | JSON de la cle du compte de service Firebase (brut ou base64) |
 | `CALENDAR_SECRET` | non | secret de signature des liens calendrier (a defaut : cle du compte de service) |
@@ -39,6 +41,8 @@ Chaque document contient `{ v: "<JSON>" }`.
 
 - `lv_users_v1` : tableau des comptes
 - `lv_missions_AAAA_MM` : `{ "AAAA-MM-JJ": [missions] }`, toujours ecrit dans le mois de la date de debut
+- `lv_companies_v1` : `[{ id, name, addresses: ["adresse"] }]`, une adresse appartient a une seule societe ; le lien se fait sur le texte du champ `location` des missions (casse et accents ignores), les missions ne sont pas modifiees
+- `monday_config` : tableau choisi, correspondance des colonnes, `auto` (import automatique des nouveaux elements a l ouverture puis toutes les 10 min) ; `monday_handled_ids` : elements Monday deja importes ou ignores ; une mission importee porte `mondayId`
 - `users_trash`, `hostaway_handled_ids`, `hostaway_notifications`, `users_backups`
 - `app_photos/{id}` : `{ b: "<base64>" }`, reference par `mission.photos[{ id }]`
 
