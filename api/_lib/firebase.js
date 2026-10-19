@@ -14,7 +14,7 @@ const AUTH_EMAIL_DOMAIN = "maintenance.beylev.com";
 const USERNAME_RE = /^[a-z0-9._-]{2,40}$/;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 // Cle web publique (deja dans public/index.html), utilisee pour verifier un mot de passe cote serveur.
-const WEB_API_KEY = process.env.FIREBASE_WEB_API_KEY || "AIzaSyB7i6PnqFAdBuGuFM84BKGYWwRT0P8GClc";
+const WEB_API_KEY = process.env.FIREBASE_WEB_API_KEY || "AIzaSyB7i6PnqFAdBuGufM04BKGYWwRT0P8GClc";
 
 let serviceAccount = null;
 /* Accepte le JSON brut (eventuellement entoure de guillemets ou d'espaces) ou sa version base64. */
