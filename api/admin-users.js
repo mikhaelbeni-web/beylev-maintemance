@@ -75,6 +75,14 @@ async function sync(req, me, current, incoming) {
   if (new Set(emails).size !== emails.length) throw fb.httpError(400, "Deux utilisateurs ont le meme email");
   if (next.some(n => !ROLES.includes(n.u.role))) throw fb.httpError(400, "Role inconnu");
   if (!next.some(n => n.u.role === "admin")) throw fb.httpError(400, "Il doit rester au moins un administrateur");
+  // Un manager avec acces aux Reglages gere les comptes, mais ne peut ni devenir ni creer un administrateur,
+  // ni modifier l'identifiant, l'email, le role ou le mot de passe d'un administrateur (sinon il prend son compte).
+  if (me.role !== "admin") {
+    for (const { u, prev, newPassword } of next) {
+      const touchesAdmin = prev.role === "admin" && (u.role !== "admin" || u.username !== prev.username || fb.normEmail(u.email) !== fb.normEmail(prev.email) || newPassword);
+      if ((u.role === "admin" && prev.role !== "admin") || touchesAdmin) throw fb.httpError(403, "Seul un administrateur peut modifier un compte administrateur");
+    }
+  }
   for (const n of next) {
     if (n.newPassword && n.newPassword.length < 6) throw fb.httpError(400, `Mot de passe de ${n.u.name || n.u.username} : 6 caracteres minimum`);
     if (!n.u.authUid && !n.u.password && !n.newPassword) throw fb.httpError(400, `${n.u.name || n.u.username} : mot de passe requis`);
@@ -82,7 +90,8 @@ async function sync(req, me, current, incoming) {
 
   for (const n of next) {
     const { u, prev, newPassword } = n;
-    if (newPassword) u.authUid = await ensureAuthUser(u, newPassword);
+    // L'ancien mot de passe est retire : sinon, a la premiere connexion, il remplacait le nouveau (api/auth-migrate).
+    if (newPassword) { u.authUid = await ensureAuthUser(u, newPassword); delete u.password; }
     else if (u.authUid && (fb.authEmailOf(prev) !== fb.authEmailOf(u) || prev.name !== u.name)) await updateAuthUser(u, { email: fb.authEmailOf(u), displayName: u.name });
     if (u.authUid) {
       await fb.auth().setCustomUserClaims(u.authUid, fb.claimsOf(u));
@@ -99,6 +108,7 @@ async function remove(me, users, id) {
   const u = users.find(x => x.id === id);
   if (!u) throw fb.httpError(404, "Utilisateur introuvable");
   if (u.id === me.id) throw fb.httpError(400, "Impossible de supprimer son propre compte");
+  if (u.role === "admin" && me.role !== "admin") throw fb.httpError(403, "Seul un administrateur peut supprimer un compte administrateur");
   if (u.role === "admin" && !users.some(x => x.id !== id && x.role === "admin")) throw fb.httpError(400, "Impossible de supprimer le dernier administrateur");
   const trash = (await fb.getDoc(fb.USERS_TRASH_KEY)) || [];
   await fb.setDoc(fb.USERS_TRASH_KEY, [...trash, { ...u, deletedAt: new Date().toISOString(), deletedBy: me.id }]);
@@ -106,11 +116,14 @@ async function remove(me, users, id) {
   if (u.authUid) { await updateAuthUser(u, { disabled: true }); await fb.auth().revokeRefreshTokens(u.authUid).catch(() => {}); }
 }
 
-async function restore(users, id, deletedAt) {
+async function restore(me, users, id, deletedAt) {
   const trash = (await fb.getDoc(fb.USERS_TRASH_KEY)) || [];
   const t = trash.find(x => x.id === id && String(x.deletedAt) === String(deletedAt));
   if (!t) throw fb.httpError(404, "Introuvable dans la corbeille");
   if (users.some(x => x.username === t.username || x.id === t.id)) throw fb.httpError(409, "Un utilisateur actif a deja cet identifiant");
+  if (t.role === "admin" && me.role !== "admin") throw fb.httpError(403, "Seul un administrateur peut restaurer un compte administrateur");
+  if (t.email && users.some(x => fb.normEmail(x.email) === fb.normEmail(t.email))) throw fb.httpError(409, "Un utilisateur actif a deja cet email");
+  if (t.authUid && users.some(x => x.authUid === t.authUid)) throw fb.httpError(409, "Ce compte de connexion est deja utilise par un utilisateur actif");
   const { deletedAt: _d, deletedBy: _b, ...u } = t;
   await fb.setDoc(fb.USERS_KEY, [...users, u]);
   await fb.setDoc(fb.USERS_TRASH_KEY, trash.filter(x => x !== t));
@@ -139,7 +152,7 @@ module.exports = async (req, res) => {
     if (p.action === "list") { /* lecture seule */ }
     else if (p.action === "sync") list = await sync(req, me, users, p.users);
     else if (p.action === "delete") { await remove(me, users, p.id); list = users.filter(x => x.id !== p.id); }
-    else if (p.action === "restore") { await restore(users, p.id, p.deletedAt); list = (await fb.getDoc(fb.USERS_KEY)) || []; }
+    else if (p.action === "restore") { await restore(me, users, p.id, p.deletedAt); list = (await fb.getDoc(fb.USERS_KEY)) || []; }
     else if (p.action === "purgeLegacyPasswords") {
       if (me.role !== "admin") throw fb.httpError(403, "Reserve aux administrateurs");
       extra.notMigrated = await purgeLegacyPasswords(users);

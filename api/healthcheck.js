@@ -93,8 +93,10 @@ async function checkResend() {
   return "Resend OK, domaine verifie";
 }
 
+const esc = v => String(v ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+
 async function sendAlert(failures) {
-  const rows = failures.map(f => `<tr><td style="padding:8px;border:1px solid #e2e8f0;font-weight:bold;color:#dc2626">${f.service}</td><td style="padding:8px;border:1px solid #e2e8f0">${f.error}</td></tr>`).join("");
+  const rows = failures.map(f => `<tr><td style="padding:8px;border:1px solid #e2e8f0;font-weight:bold;color:#dc2626">${esc(f.service)}</td><td style="padding:8px;border:1px solid #e2e8f0">${esc(f.error)}</td></tr>`).join("");
   const html = `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto">
     <div style="background:#dc2626;color:white;padding:20px;border-radius:12px 12px 0 0">
       <h2 style="margin:0">ALERTE - Panne detectee sur Beylev Maintenance</h2>
