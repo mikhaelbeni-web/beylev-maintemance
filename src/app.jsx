@@ -195,10 +195,17 @@ async function importMissions(list) {
 }
 async function removeMissionHard(mission) {
   const ref = st.ref(monthKeyOf(mission.date));
+  let photos = [];
   await db.runTransaction(async tx => {
     const s = await tx.get(ref);
+    const cur = flattenMonth(st.parse(s)).find(x => x.id === mission.id);
+    // Restauree entre-temps sur un autre appareil (copie locale perimee) : on ne supprime rien.
+    if (!cur || !cur.deletedAt) { photos = []; return; }
+    photos = cur.photos || [];
     tx.set(ref, { v: JSON.stringify(withoutId(st.parse(s), mission.id)) });
   });
+  // Les photos de la mission supprimee definitivement restaient en base pour toujours.
+  photos.forEach(p => p && p.id && db.collection(PHOTOS).doc(p.id).delete().catch(() => {}));
 }
 /* Appel des fonctions api/ avec le jeton Firebase de l utilisateur connecte. */
 async function apiFetch(url, opts = {}) {
@@ -218,10 +225,15 @@ async function sendEmail(to, subject, html) {
   const list = (Array.isArray(to) ? to : [to]).filter(x => x && x.includes("@"));
   if (!list.length) return { skipped: true };
   try {
-    const r = await apiFetch("/api/send-email", { method: "POST", body: JSON.stringify({ to: list, subject, html }) });
-    return await r.json().catch(() => ({ ok: r.ok }));
+    const r = await apiFetch("/api/send-email", { method: "POST", body: JSON.stringify({ to: list, subject: String(subject).replace(/[\r\n]+/g, " "), html }) });
+    const j = await r.json().catch(() => ({}));
+    // Un refus du serveur (401, 403, 500, 502) passait pour un succes.
+    if (!r.ok) { console.warn("Email non envoye", j.error || r.status); return { error: j.error || "HTTP " + r.status }; }
+    return j;
   } catch (e) { console.warn("Email non envoye", e); return { error: String(e) }; }
 }
+/* Envoi sans attendre, mais un echec est signale a l utilisateur au lieu de passer inapercu. */
+const mailOrWarn = (notify, ...args) => sendEmail(...args).then(r => { if (r && r.error) notify("Intervention enregistrée, mais email non envoyé : " + r.error, true); });
 function missionEmailHtml(m, intro, users) {
   const a = users.find(u => u.id === m.assignedTo);
   const c = users.find(u => u.id === m.createdBy);
@@ -230,7 +242,7 @@ function missionEmailHtml(m, intro, users) {
     <table style="border-collapse:collapse;font-size:14px">
       <tr><td style="padding:4px 12px 4px 0;color:#676879">Intervention</td><td><b>${escHtml(m.title)}</b></td></tr>
       <tr><td style="padding:4px 12px 4px 0;color:#676879">Lieu</td><td>${escHtml(m.location || "Non précisé")}</td></tr>
-      <tr><td style="padding:4px 12px 4px 0;color:#676879">Date</td><td>${fmtDateLong(m.date)}${m.dateEnd && m.dateEnd !== m.date ? " au " + fmtDateLong(m.dateEnd) : ""}${m.time ? " à " + m.time : ""}</td></tr>
+      <tr><td style="padding:4px 12px 4px 0;color:#676879">Date</td><td>${escHtml(fmtDateLong(m.date))}${m.dateEnd && m.dateEnd !== m.date ? " au " + escHtml(fmtDateLong(m.dateEnd)) : ""}${m.time ? " à " + escHtml(m.time) : ""}</td></tr>
       <tr><td style="padding:4px 12px 4px 0;color:#676879">Priorité</td><td>${m.priority === "urgent" ? "URGENT" : "Normale"}</td></tr>
       <tr><td style="padding:4px 12px 4px 0;color:#676879">Assigné à</td><td>${escHtml(a ? a.name : "—")}</td></tr>
       <tr><td style="padding:4px 12px 4px 0;color:#676879">Créé par</td><td>${escHtml(c ? c.name : "—")}</td></tr>
@@ -243,14 +255,14 @@ function compressImage(file, maxSide = 1100, quality = 0.7) {
   return new Promise((resolve, reject) => {
     const img = new Image(); const reader = new FileReader();
     reader.onload = e => { img.src = e.target.result; };
-    reader.onerror = reject;
+    reader.onerror = () => reject(new Error("fichier illisible"));
     img.onload = () => {
       const scale = Math.min(1, maxSide / Math.max(img.width, img.height));
       const c = document.createElement("canvas"); c.width = Math.round(img.width * scale); c.height = Math.round(img.height * scale);
       c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
       resolve(c.toDataURL("image/jpeg", quality));
     };
-    img.onerror = reject;
+    img.onerror = () => reject(new Error("format d’image non pris en charge"));
     reader.readAsDataURL(file);
   });
 }
@@ -500,8 +512,11 @@ function MissionModal({ initial, me, onClose, notify }) {
   const saveFull = rec => save(rec, isNew ? null : initial.date, isNew ? null : { updatedAt: baseUpdatedAt.current });
   /* Statut, commentaire, photo : modification ciblee sur la version en base, sans toucher aux champs en cours d edition. */
   async function patchFields(fn, fields) {
-    const cur = await patch({ id: initial.id, date: initial.date }, fn);
-    baseUpdatedAt.current = cur.updatedAt;
+    let before;
+    const cur = await patch({ id: initial.id, date: initial.date }, x => { before = x.updatedAt; return fn(x); });
+    // N'avance la version de reference que si personne d'autre n'a modifie la fiche entre-temps :
+    // sinon un « Enregistrer » ecraserait sans avertissement les modifications de l'autre appareil.
+    if ((before || "") === (baseUpdatedAt.current || "")) baseUpdatedAt.current = cur.updatedAt;
     // Fiche en lecture seule (technicien) : on affiche toute la version en base ; sinon on garde les champs en cours d edition.
     setM(p => { if (!canEditContent) return cur; const n = { ...p, updatedAt: cur.updatedAt }; fields.forEach(k => { n[k] = cur[k]; }); return n; });
     return cur;
@@ -519,11 +534,11 @@ function MissionModal({ initial, me, onClose, notify }) {
       await saveFull(rec);
       if (isNew && !rec.approved) {
         const admins = users.filter(u => isStrictAdmin(u) && u.email).map(u => u.email);
-        sendEmail(admins, `[Beylev] Intervention à valider : ${rec.title}`, missionEmailHtml(rec, `${me.name} a soumis une intervention à valider.`, users));
+        mailOrWarn(notify, admins, `[Beylev] Intervention à valider : ${rec.title}`, missionEmailHtml(rec, `${me.name} a soumis une intervention à valider.`, users));
         notify("Intervention soumise pour validation");
       } else if (isNew) {
         const a = users.find(u => u.id === rec.assignedTo);
-        if (a && a.email && a.id !== me.id) sendEmail(a.email, `[Beylev] Nouvelle intervention : ${rec.title}`, missionEmailHtml(rec, "Une nouvelle intervention vous a été assignée.", users));
+        if (a && a.email && a.id !== me.id) mailOrWarn(notify, a.email, `[Beylev] Nouvelle intervention : ${rec.title}`, missionEmailHtml(rec, "Une nouvelle intervention vous a été assignée.", users));
         notify("Intervention créée");
       } else notify("Modifications enregistrées");
       onClose();
@@ -537,9 +552,9 @@ function MissionModal({ initial, me, onClose, notify }) {
       const rec = { ...m, approved: true, approvedBy: me.id, approvedAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
       await saveFull(rec);
       const a = users.find(u => u.id === rec.assignedTo);
-      if (a && a.email) sendEmail(a.email, `[Beylev] Intervention validée : ${rec.title}`, missionEmailHtml(rec, "Votre intervention a été validée et vous est assignée.", users));
+      if (a && a.email) mailOrWarn(notify, a.email, `[Beylev] Intervention validée : ${rec.title}`, missionEmailHtml(rec, "Votre intervention a été validée et vous est assignée.", users));
       if (rec.hostawayId) {
-        sendEmail(GESTION_EMAIL, `URGENT - Bloquer la date Hostaway : ${rec.title}`, missionEmailHtml(rec, "Une intervention importée depuis Hostaway vient d’être validée. Pensez à bloquer la date sur Hostaway si nécessaire.", users));
+        mailOrWarn(notify, GESTION_EMAIL, `URGENT - Bloquer la date Hostaway : ${rec.title}`, missionEmailHtml(rec, "Une intervention importée depuis Hostaway vient d’être validée. Pensez à bloquer la date sur Hostaway si nécessaire.", users));
         const n = [{ id: uid(), title: rec.title, date: rec.date, location: rec.location || "", createdAt: new Date().toISOString(), read: false }, ...hostawayNotifs].slice(0, 30);
         saveHostawayNotifs(n).catch(() => {});
       }
@@ -574,7 +589,11 @@ function MissionModal({ initial, me, onClose, notify }) {
     if (!added.length) return;
     if (isNew) return setM(p => ({ ...p, photos: [...(p.photos || []), ...added] }));
     try { await patchFields(cur => ({ ...cur, photos: [...(cur.photos || []), ...added] }), ["photos"]); notify(added.length > 1 ? "Photos ajoutées" : "Photo ajoutée"); }
-    catch (err) { notify("Erreur : " + err.message, true); }
+    catch (err) {
+      // Reference non enregistree : les photos envoyees ne serviraient a rien.
+      added.forEach(p => db.collection(PHOTOS).doc(p.id).delete().catch(() => {}));
+      notify("Erreur : " + err.message, true);
+    }
   }
   // Le technicien supprime les photos qu il a ajoutees ; admin et manager, toutes les photos.
   const canDeletePhoto = p => !isTech || p.by === me.id;
@@ -947,7 +966,7 @@ function HostawayImport({ me, onClose, notify }) {
       }
       await saveHostawayIds([...new Set([...hostawayIds, ...sel.map(r => r.id)])]);
       const admins = users.filter(u => isStrictAdmin(u) && u.email).map(u => u.email);
-      sendEmail(admins, `[Beylev] ${sel.length} intervention(s) Hostaway à valider`, `<p>${escHtml(me.name)} a soumis ${sel.length} intervention(s) importée(s) depuis Hostaway :</p><ul>${sel.map(r => `<li><b>${escHtml(r.title)}</b> — ${fmtDateLong(r.date)} — ${escHtml(r.location === "CUSTOM" ? r.custom : r.location)}</li>`).join("")}</ul><p><a href="${location.origin}">Ouvrir le planning</a></p>`);
+      mailOrWarn(notify, admins, `[Beylev] ${sel.length} intervention(s) Hostaway à valider`, `<p>${escHtml(me.name)} a soumis ${sel.length} intervention(s) importée(s) depuis Hostaway :</p><ul>${sel.map(r => `<li><b>${escHtml(r.title)}</b> — ${fmtDateLong(r.date)} — ${escHtml(r.location === "CUSTOM" ? r.custom : r.location)}</li>`).join("")}</ul><p><a href="${location.origin}">Ouvrir le planning</a></p>`);
       notify(`${sel.length} intervention(s) soumise(s) pour validation`);
       onClose();
     } catch (e) { notify("Erreur : " + e.message, true); }
@@ -1014,9 +1033,11 @@ function guessMapping(columns) {
 }
 function mondayStatus(text) {
   const t = norm(text);
-  if (/termin|done|fait|fini|clos|realis/.test(t)) return "done";
-  if (/cours|working|progress|demarr/.test(t)) return "inprogress";
+  // Ordre important : « non termine », « a realiser », « a definir » (contient « fini ») ne sont pas des taches faites.
   if (/annul|cancel/.test(t)) return "cancelled";
+  if (/^(a|non|pas) |\b(non|pas) /.test(t) || /\bto ?do\b/.test(t)) return "todo";
+  if (/cours|working|progress|demarr/.test(t)) return "inprogress";
+  if (/\b(termine|done|fait|fini|clos|cloture|realise)e?s?\b/.test(t)) return "done";
   return "todo";
 }
 /* Quand le tableau n est pas organise par adresse, le nom de l element contient souvent le surnom du lieu
@@ -1449,7 +1470,8 @@ function HistoryScreen({ me, visible, onOpen }) {
   const defaultMonths = useMemo(() => { const now = new Date(); const out = []; for (let i = 6; i >= -12; i--) { const d = new Date(now.getFullYear(), now.getMonth() + i, 1); out.push(monthKeyYM(d.getFullYear(), d.getMonth())); } return out; }, []);
   useEffect(() => { fetchMonths(defaultMonths); }, [fetchMonths, defaultMonths]);
   // Une periode hors de la fenetre par defaut charge les mois correspondants
-  useEffect(() => { if (from || to) fetchMonths(monthKeysBetween(from || to, to || from)); }, [from, to, fetchMonths]);
+  // « Du » seul : tout ce qui suit est affiche, donc on charge jusqu'a aujourd'hui (les mois a venir sont deja charges).
+  useEffect(() => { if (from || to) fetchMonths(monthKeysBetween(from || to, to || (from > todayStr() ? from : todayStr()))); }, [from, to, fetchMonths]);
 
   const companyIdOf = m => { const c = companyOf(m.location); return c ? c.id : NO_COMPANY; };
   // Les adresses proposees se limitent aux societes cochees

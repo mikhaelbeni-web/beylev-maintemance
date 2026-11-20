@@ -25,7 +25,7 @@ module.exports = async (req, res) => {
     const r = await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ from: FROM_EMAIL, to, subject: String(p.subject).slice(0, 200), html: p.html })
+      body: JSON.stringify({ from: FROM_EMAIL, to, subject: String(p.subject).replace(/[\r\n]+/g, " ").slice(0, 200), html: p.html })
     });
     const data = await r.json().catch(() => ({}));
     res.status(r.ok ? 200 : 502).json(data);
